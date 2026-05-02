@@ -5,6 +5,7 @@ Semester Project for a secure, modular, and scalable web-based online examinatio
 ## 1. Project Title
 
 Secure Online Examination System with Multi-Layer Security & Behavioral Risk Detection
+See [installation.md](installation.md) for full setup and run instructions.
 
 ## 2. Project Objective
 
