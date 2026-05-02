@@ -49,7 +49,7 @@ SWAGGER_TEMPLATE = {
             "type": "apiKey",
             "name": "Authorization",
             "in": "header",
-            "description": "Enter: **Bearer &lt;your_jwt_token&gt;**"
+            "description": "Enter the token with the Bearer prefix: **Bearer &lt;your_jwt_token&gt;**"
         }
     },
     # Applied globally — every endpoint requires JWT unless overridden

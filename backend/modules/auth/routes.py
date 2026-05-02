@@ -1,6 +1,7 @@
 from flask import Blueprint
 
 from modules.auth.controller import exam_state, health, login, profile, register
+from middleware.jwt_auth import jwt_required
 
 
 auth_bp = Blueprint("auth_bp", __name__)
@@ -86,6 +87,7 @@ def login_route():
 
 
 @auth_bp.route("/profile", methods=["GET"])
+@jwt_required
 def profile_route():
     """
     Return the authenticated user's profile.
@@ -108,6 +110,7 @@ def profile_route():
 
 
 @auth_bp.route("/exam/state/<exam_id>", methods=["GET"])
+@jwt_required
 def exam_state_route(exam_id):
     """
     Return the current exam state.

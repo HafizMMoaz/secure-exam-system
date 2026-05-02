@@ -108,7 +108,7 @@ def login_user(payload):
         if isinstance(token, bytes):
             token = token.decode("utf-8")
 
-        return {"token": token, "role": user["role"]}
+        return {"token": token, "role": user["role"], "username": user["username"]}
     except (UserNotFoundException, UnauthorizedException):
         raise
     except ValueError:
