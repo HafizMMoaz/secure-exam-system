@@ -1,7 +1,6 @@
 def register_routes(app):
-    print("Registering routes...")
-    #from modules.auth import auth_bp
-    #app.register_blueprint(auth_bp, url_prefix="/api/auth")
+    from modules.auth import auth_bp
+    app.register_blueprint(auth_bp, url_prefix="/api/auth")
 
     # from modules.session import session_bp
     # app.register_blueprint(session_bp, url_prefix="/api/session")
