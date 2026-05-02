@@ -35,8 +35,8 @@ def register_routes(app):
     # from modules.activity import activity_bp
     # app.register_blueprint(activity_bp, url_prefix="/api/activity")
 
-    # from modules.logging import logging_bp
-    # app.register_blueprint(logging_bp, url_prefix="/api/logs")
+    from modules.logging import logging_bp
+    app.register_blueprint(logging_bp, url_prefix="/api/logs")
 
     # from modules.multisession import multisession_bp
     # app.register_blueprint(multisession_bp, url_prefix="/api/multisession")
