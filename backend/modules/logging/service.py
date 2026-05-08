@@ -139,3 +139,12 @@ def list_logs(filters):
         return {"logs": items, "count": len(items)}
     except PyMongoError as exc:
         raise DatabaseException(str(exc))
+
+
+def get_health():
+    return {
+        "module_name": ModuleName.LOGGING.value,
+        "dependencies": ["mongodb"],
+        "version": "1.0.0",
+        "healthy": True,
+    }
