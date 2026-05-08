@@ -531,6 +531,7 @@ Before final submission, each module must pass:
 - Module 2: Secure Session Management - done
 - Module 3: Device Fingerprinting - done
 - Module 4: Activation Code Security - done
+- Module 5: RBAC - done
 - Other modules: pending integration
 
 ## 29. Repository Notes
