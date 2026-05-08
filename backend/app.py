@@ -2,9 +2,9 @@ from flask import Flask
 from flask_cors import CORS
 
 from exceptions import register_error_handlers
-from responses import success_response
 from config.swagger import init_swagger
 from routes import register_routes
+from routes.health import global_health as get_global_health
 from config.config import PORT
 
 app = Flask(__name__)
@@ -34,10 +34,7 @@ def global_health():
         schema:
           $ref: '#/definitions/SuccessResponse'
     """
-    return success_response(
-        data={"system": "secure-exam-system"},
-        message="System is healthy"
-    )
+    return get_global_health()
 
 
 if __name__ == "__main__":
