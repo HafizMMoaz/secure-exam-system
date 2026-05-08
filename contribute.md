@@ -42,7 +42,7 @@ docker run -d --name mongo -p 27017:27017 mongo:6
 - Start the Flask app (project entrypoint is `backend/app.py`):
 
 ```powershell
-python backend/app.py
+flask run
 ```
 
 4) Create a new working branch

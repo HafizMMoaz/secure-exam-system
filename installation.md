@@ -37,7 +37,7 @@ JWT_EXPIRY_MINUTES=60
 5. Start the Flask server.
 
 ```powershell
-python app.py
+flask run
 ```
 
 ### Backend endpoints
