@@ -1,4 +1,4 @@
-from datetime import datetime
+from config.config import now
 import hashlib
 import json
 
@@ -67,7 +67,7 @@ def write_log(payload):
     integrity_hash = _compute_integrity(content)
 
     doc = dict(content)
-    doc.update({"integrity_hash": integrity_hash, "received_at": datetime.utcnow()})
+    doc.update({"integrity_hash": integrity_hash, "received_at": now()})
 
     try:
         result = logs_col.insert_one(doc)

@@ -26,6 +26,13 @@ Copy-Item .env.example .env
 # Edit .env to set MONGO_URI, JWT_SECRET, JWT_EXPIRY_MINUTES, etc.
 ```
 
+- Generate a secure `JWT_SECRET` and add it to `backend/.env` before running the app:
+
+```powershell
+python backend/tools/generate_jwt_secret.py --bytes 32 --format urlsafe
+# Copy the printed secret into the JWT_SECRET entry in backend/.env
+``` 
+
 - Ensure MongoDB is running. Using Docker (example):
 
 ```powershell

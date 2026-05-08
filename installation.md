@@ -42,6 +42,14 @@ python app.py
 
 ### Backend endpoints
 
+You can generate a strong secret with the included tool:
+
+```bash
+python backend/tools/generate_jwt_secret.py --bytes 32 --format urlsafe
+```
+
+Copy the printed value into the `JWT_SECRET` field in `backend/.env`.
+
 - API base: `http://127.0.0.1:5000`
 - Swagger docs: `http://127.0.0.1:5000/api/docs`
 - Health check: `http://127.0.0.1:5000/api/health`

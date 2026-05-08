@@ -1,7 +1,7 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 import requests
 
-from config.config import sessions_col, JWT_EXPIRY_MINUTES, BASE_URL
+from config.config import sessions_col, JWT_EXPIRY_MINUTES, BASE_URL, now
 from enums.module_name import ModuleName
 from enums.log_level import LogLevel
 from exceptions import (
@@ -13,7 +13,7 @@ from exceptions import (
 
 
 def _iso_now():
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    return now().replace(microsecond=0).isoformat() + "Z"
 
 
 def create_session(user_context):
@@ -30,7 +30,7 @@ def create_session(user_context):
     if existing:
         raise SessionAlreadyActiveException()
 
-    now = datetime.utcnow()
+    now = now()
     expires_at = now + timedelta(minutes=JWT_EXPIRY_MINUTES)
 
     doc = {
@@ -75,7 +75,7 @@ def invalidate_session(session_id):
     try:
         sessions_col.update_one(
             {"session_id": session_id},
-            {"$set": {"is_active": False, "invalidated_at": datetime.utcnow()}},
+            {"$set": {"is_active": False, "invalidated_at": now()}},
         )
     except Exception as exc:
         raise DatabaseException(str(exc))
@@ -106,7 +106,7 @@ def validate_session(session_id):
     if not session:
         raise SessionNotFoundException()
 
-    now = datetime.utcnow()
+    now = now()
     expires_at = session.get("expires_at")
     is_active = session.get("is_active", False)
 
