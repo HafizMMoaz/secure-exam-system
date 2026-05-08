@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
+from config.config import now
 from uuid import uuid4
 
 import bcrypt
@@ -29,7 +30,7 @@ def _validate_required_fields(payload, required_fields):
 
 
 def _serialize_created_at(created_at):
-    if isinstance(created_at, datetime):
+    if isinstance(created_at, type(now())):
         return created_at.replace(microsecond=0).isoformat() + "Z"
     return created_at
 
@@ -63,7 +64,7 @@ def register_user(payload):
             "username": username,
             "password_hash": password_hash,
             "role": role,
-            "created_at": datetime.utcnow(),
+            "created_at": now(),
             "is_active": True,
         }
 
@@ -101,7 +102,7 @@ def login_user(payload):
             "role": user["role"],
             "session_id": str(uuid4()),
             "device_fingerprint_hash": "",
-            "exp": datetime.utcnow() + timedelta(minutes=JWT_EXPIRY_MINUTES),
+            "exp": now() + timedelta(minutes=JWT_EXPIRY_MINUTES),
         }
 
         token = jwt.encode(token_payload, JWT_SECRET, algorithm="HS256")

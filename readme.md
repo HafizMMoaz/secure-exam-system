@@ -399,6 +399,24 @@ Error response format:
 
 All modules must send logs to a single logging endpoint.
 
+## Generating a JWT Secret
+
+Generate a secure JWT secret and add it to `backend/.env` as `JWT_SECRET`.
+
+Use the included helper script to create a secret:
+
+```bash
+python backend/tools/generate_jwt_secret.py --bytes 32 --format urlsafe
+```
+
+Then add the output value to your `backend/.env` file:
+
+```env
+JWT_SECRET=PASTE_GENERATED_SECRET_HERE
+```
+
+Recommended: keep this secret private and rotate periodically.
+
 Endpoint:
 
 ```http

@@ -5,6 +5,7 @@ from exceptions import register_error_handlers
 from responses import success_response
 from config.swagger import init_swagger
 from routes import register_routes
+from config.config import PORT
 
 app = Flask(__name__)
 CORS(app)
@@ -40,4 +41,4 @@ def global_health():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+  app.run(debug=True, port=PORT)
