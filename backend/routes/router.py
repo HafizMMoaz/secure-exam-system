@@ -5,8 +5,8 @@ def register_routes(app):
     from modules.session import session_bp
     app.register_blueprint(session_bp, url_prefix="/api/session")
 
-    # from modules.device import device_bp
-    # app.register_blueprint(device_bp, url_prefix="/api/device")
+    from modules.device import device_bp
+    app.register_blueprint(device_bp, url_prefix="/api/device")
 
     # from modules.activation import activation_bp
     # app.register_blueprint(activation_bp, url_prefix="/api/activation")
