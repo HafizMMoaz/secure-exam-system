@@ -31,6 +31,7 @@ responses_col = db["responses"]
 logs_col = db["logs"]
 risk_scores_col = db["risk_scores"]
 sessions_col = db["sessions"]
+activation_codes_col = db["activation_codes"]
 
 
 def now():
