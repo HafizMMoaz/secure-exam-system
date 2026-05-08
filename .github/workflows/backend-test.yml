@@ -1,0 +1,84 @@
+name: Backend Test
+
+on:
+  push:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-test.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-test.yml"
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+
+    services:
+      mongodb:
+        image: mongo:6
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set backend environment
+        run: |
+          echo "MONGO_URI=mongodb://127.0.0.1:27017/exam_security" >> $GITHUB_ENV
+          echo "JWT_SECRET=ci_test_secret_change_me" >> $GITHUB_ENV
+          echo "BASE_URL=http://127.0.0.1:5500" >> $GITHUB_ENV
+          echo "TIMEZONE=Asia/Karachi" >> $GITHUB_ENV
+          echo "PORT=5500" >> $GITHUB_ENV
+
+      - name: Install backend dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compile backend Python files
+        run: |
+          python - <<'PY'
+          import pathlib
+          import py_compile
+
+          backend_root = pathlib.Path('.')
+          for path in backend_root.rglob('*.py'):
+              if '.venv' in path.parts:
+                  continue
+              py_compile.compile(str(path), doraise=True)
+          print('Backend Python compilation passed')
+          PY
+
+      - name: Start backend server
+        run: |
+          python -m flask --app app run --host 127.0.0.1 --port 5500 --no-reload > /tmp/backend.log 2>&1 &
+          echo $! > /tmp/backend.pid
+
+      - name: Smoke test /api/health
+        run: |
+          curl --fail --retry 20 --retry-delay 1 --retry-connrefused http://127.0.0.1:5500/api/health
+
+      - name: Show backend log on failure
+        if: failure()
+        run: cat /tmp/backend.log
+
+      - name: Stop backend server
+        if: always()
+        run: |
+          if [ -f /tmp/backend.pid ]; then
+            kill "$(cat /tmp/backend.pid)" || true
+          fi
