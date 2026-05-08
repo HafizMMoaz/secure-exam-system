@@ -8,6 +8,11 @@ JWT_SECRET = os.getenv("JWT_SECRET")
 JWT_EXPIRY_MINUTES = int(os.getenv("JWT_EXPIRY_MINUTES", 60))
 MONGO_URI = os.getenv("MONGO_URI")
 
+# Base URL for internal service calls
+BASE_URL = os.getenv("BASE_URL", "http://localhost:5000")
+# Port the Flask app should bind to when started via app.py
+PORT = int(os.getenv("PORT", 5500))
+
 client = MongoClient(MONGO_URI)
 db = client["exam_security"]
 

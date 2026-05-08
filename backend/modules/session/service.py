@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 import requests
 
-from config.config import sessions_col, JWT_EXPIRY_MINUTES
+from config.config import sessions_col, JWT_EXPIRY_MINUTES, BASE_URL
 from enums.module_name import ModuleName
 from enums.log_level import LogLevel
 from exceptions import (
@@ -60,7 +60,7 @@ def create_session(user_context):
         "timestamp": _iso_now(),
     }
     try:
-        requests.post("http://localhost:5000/api/logs/write", json=log_payload, timeout=2)
+        requests.post(f"{BASE_URL}/api/logs/write", json=log_payload, timeout=2)
     except Exception:
         pass
 
@@ -83,7 +83,7 @@ def invalidate_session(session_id):
     # Log
     try:
         requests.post(
-            "http://localhost:5000/api/logs/write",
+            f"{BASE_URL}/api/logs/write",
             json={
                 "module": ModuleName.SESSION.value,
                 "level": LogLevel.INFO.value,
