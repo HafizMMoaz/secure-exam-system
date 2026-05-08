@@ -4,7 +4,7 @@ from responses import health_response, success_response
 
 from modules.auth.service import (
     get_exam_state,
-    get_health_data,
+    get_health,
     get_profile,
     login_user,
     register_user,
@@ -35,5 +35,5 @@ def exam_state(exam_id):
 
 
 def health():
-    data = get_health_data()
+    data = get_health()
     return health_response(**data)

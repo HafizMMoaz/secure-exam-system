@@ -154,7 +154,7 @@ def get_exam_state(exam_id):
     }
 
 
-def get_health_data():
+def get_health():
     return {
         "module_name": ModuleName.AUTH.value,
         "dependencies": ["mongodb"],
