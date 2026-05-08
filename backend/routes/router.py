@@ -11,8 +11,8 @@ def register_routes(app):
     from modules.activation import activation_bp
     app.register_blueprint(activation_bp, url_prefix="/api/activation")
 
-    # from modules.rbac import rbac_bp
-    # app.register_blueprint(rbac_bp, url_prefix="/api/rbac")
+    from modules.rbac import rbac_bp
+    app.register_blueprint(rbac_bp, url_prefix="/api/rbac")
 
     # from modules.questions import questions_bp
     # app.register_blueprint(questions_bp, url_prefix="/api/questions")
