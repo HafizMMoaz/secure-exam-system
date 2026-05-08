@@ -1,5 +1,6 @@
 from responses import success_response
 from modules.auth.service import get_health as get_auth_health
+from modules.activation.service import get_health as get_activation_health
 from modules.session.service import get_health as get_session_health
 from modules.device.service import get_health as get_device_health
 from modules.logging.service import get_health as get_logging_health
@@ -26,7 +27,7 @@ def global_health():
         _module_health("Module_1_Auth", get_auth_health()),
         _module_health("Module_2_Session", get_session_health()),
         _module_health("Module_3_Device", get_device_health()),
-        _module_health("Module_4_Activation"),
+        _module_health("Module_4_Activation", get_activation_health()),
         _module_health("Module_5_RBAC"),
         _module_health("Module_6_Questions"),
         _module_health("Module_7_Randomization"),

@@ -8,8 +8,8 @@ def register_routes(app):
     from modules.device import device_bp
     app.register_blueprint(device_bp, url_prefix="/api/device")
 
-    # from modules.activation import activation_bp
-    # app.register_blueprint(activation_bp, url_prefix="/api/activation")
+    from modules.activation import activation_bp
+    app.register_blueprint(activation_bp, url_prefix="/api/activation")
 
     # from modules.rbac import rbac_bp
     # app.register_blueprint(rbac_bp, url_prefix="/api/rbac")
