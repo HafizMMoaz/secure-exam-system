@@ -18,6 +18,7 @@ APP_TZ = pytz.timezone(TIMEZONE)
 BASE_URL = os.getenv("BASE_URL", "http://localhost:5000")
 # Port the Flask app should bind to when started via app.py
 PORT = int(os.getenv("PORT", 5500))
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
 client = MongoClient(MONGO_URI)
 db = client["exam_security"]
