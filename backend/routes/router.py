@@ -14,8 +14,8 @@ def register_routes(app):
     from modules.rbac import rbac_bp
     app.register_blueprint(rbac_bp, url_prefix="/api/rbac")
 
-    # from modules.questions import questions_bp
-    # app.register_blueprint(questions_bp, url_prefix="/api/questions")
+    from modules.questions import questions_bp
+    app.register_blueprint(questions_bp, url_prefix="/api/questions")
 
     # from modules.randomization import randomization_bp
     # app.register_blueprint(randomization_bp, url_prefix="/api/randomization")
