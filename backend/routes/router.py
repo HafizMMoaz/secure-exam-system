@@ -20,8 +20,8 @@ def register_routes(app):
     from modules.randomization import randomization_bp
     app.register_blueprint(randomization_bp, url_prefix="/api/randomization")
 
-    # from modules.timer import timer_bp
-    # app.register_blueprint(timer_bp, url_prefix="/api/timer")
+    from modules.timer import timer_bp
+    app.register_blueprint(timer_bp, url_prefix="/api/timer")
 
     # from modules.validation import validation_bp
     # app.register_blueprint(validation_bp, url_prefix="/api/validation")

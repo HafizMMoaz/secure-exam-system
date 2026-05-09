@@ -33,6 +33,7 @@ risk_scores_col = db["risk_scores"]
 sessions_col = db["sessions"]
 activation_codes_col = db["activation_codes"]
 randomized_orders_col = db["randomized_orders"]
+exam_sessions_col = db["exam_sessions"]
 
 
 def now():
