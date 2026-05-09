@@ -38,8 +38,8 @@ def register_routes(app):
     from modules.logging import logging_bp
     app.register_blueprint(logging_bp, url_prefix="/api/logs")
 
-    # from modules.multisession import multisession_bp
-    # app.register_blueprint(multisession_bp, url_prefix="/api/multisession")
+    from modules.multisession import multisession_bp
+    app.register_blueprint(multisession_bp, url_prefix="/api/multisession")
 
     # from modules.behavioral import behavioral_bp
     # app.register_blueprint(behavioral_bp, url_prefix="/api/behavioral")
