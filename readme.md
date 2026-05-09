@@ -9,21 +9,23 @@ See [installation.md](installation.md) for full setup and run instructions.
 
 ## Current Status
 
-- Module 1: Secure Authentication - done
-- Module 13: Secure Logging - done
-- Module 2: Secure Session Management - done
-- Module 3: Device Fingerprinting - done
-- Module 4: Activation Code Security - done
-- Module 5: RBAC - done
-- Module 6: Questions Creation, Delivery, etc - done
-- Module 7: Questions Randomization - done
-- Module 8: Secure Timer - done
-- Module 9: Input Validation – Injection prevention - done
-- Module 10: Tab Monitoring - done
-- Module 11: Clipboard Monitoring - done
-- Module 12: Activity Logging – Audit trails - done
-- Module 14: Multi-Session Detection - done
-- Module 15: Behavioral Analysis - done
+- Module 1: Secure Authentication - backend done
+- Module 13: Secure Logging - backend done
+- Module 2: Secure Session Management - backend done
+- Module 3: Device Fingerprinting - backend done
+- Module 4: Activation Code Security - backend done
+- Module 5: RBAC - backend done
+- Module 6: Questions Creation, Delivery, etc - backend done
+- Module 7: Questions Randomization - backend done
+- Module 8: Secure Timer - backend done
+- Module 9: Input Validation – Injection prevention - backend done
+- Module 10: Tab Monitoring - backend done
+- Module 11: Clipboard Monitoring - backend done
+- Module 12: Activity Logging – Audit trails - backend done
+- Module 14: Multi-Session Detection - backend done
+- Module 15: Behavioral Analysis - backend done
+- Module 16: Similarity Detection - backend done
+- Module 17: Risk Scoring and Dashboard - backend done
 - Other modules: pending integration
 
 ## 2. Project Objective
