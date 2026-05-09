@@ -44,8 +44,8 @@ def register_routes(app):
     from modules.behavioral import behavioral_bp
     app.register_blueprint(behavioral_bp, url_prefix="/api/behavioral")
 
-    # from modules.similarity import similarity_bp
-    # app.register_blueprint(similarity_bp, url_prefix="/api/similarity")
+    from modules.similarity import similarity_bp
+    app.register_blueprint(similarity_bp, url_prefix="/api/similarity")
 
     # from modules.risk import risk_bp
     # app.register_blueprint(risk_bp, url_prefix="/api/risk")
