@@ -36,6 +36,7 @@ randomized_orders_col = db["randomized_orders"]
 exam_sessions_col = db["exam_sessions"]
 tab_events_col = db["tab_events"]
 clipboard_events_col = db["clipboard_events"]
+activity_events_col = db["activity_events"]
 
 
 def now():
