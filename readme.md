@@ -21,6 +21,9 @@ See [installation.md](installation.md) for full setup and run instructions.
 - Module 9: Input Validation – Injection prevention - done
 - Module 10: Tab Monitoring - done
 - Module 11: Clipboard Monitoring - done
+- Module 12: Activity Logging – Audit trails - done
+- Module 14: Multi-Session Detection - done
+- Module 15: Behavioral Analysis - done
 - Other modules: pending integration
 
 ## 2. Project Objective
