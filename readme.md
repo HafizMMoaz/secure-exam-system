@@ -7,6 +7,19 @@ Semester Project for a secure, modular, and scalable web-based online examinatio
 Secure Online Examination System with Multi-Layer Security & Behavioral Risk Detection
 See [installation.md](installation.md) for full setup and run instructions.
 
+## Current Status
+
+- Module 1: Secure Authentication - done
+- Module 13: Secure Logging - done
+- Module 2: Secure Session Management - done
+- Module 3: Device Fingerprinting - done
+- Module 4: Activation Code Security - done
+- Module 5: RBAC - done
+- Module 6: Questions Creation, Delivery, etc - done
+- Module 7: Questions Randomization - done
+- Module 8: Secure Timer - done
+- Other modules: pending integration
+
 ## 2. Project Objective
 
 The objective of this project is to design and develop a secure, modular, and scalable web-based online examination system that enforces academic integrity by implementing core information security concepts, including:
@@ -524,23 +537,12 @@ Before final submission, each module must pass:
 3. Health test: `GET /health` returns 200 within 1 second
 4. State test: attempt an exam action in the wrong state and receive HTTP 409
 
-## 28. Current Status
-
-- Module 1: Secure Authentication - done
-- Module 13: Secure Logging - done
-- Module 2: Secure Session Management - done
-- Module 3: Device Fingerprinting - done
-- Module 4: Activation Code Security - done
-- Module 5: RBAC - done
-- Module 6: Questions Creation, Delivery, etc - done
-- Other modules: pending integration
-
-## 29. Repository Notes
+## 28. Repository Notes
 
 - Backend: Flask API in `backend/`
 - Frontend: Web client planned in `frontend/`
 - Shared configuration and security policy should remain consistent across modules
 
-## 30. How to Run the Project
+## 29. How to Run the Project
 
 See [installation.md](installation.md) for full setup and run instructions.
