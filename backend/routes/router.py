@@ -26,8 +26,8 @@ def register_routes(app):
     from modules.validation import validation_bp
     app.register_blueprint(validation_bp, url_prefix="/api/validation")
 
-    # from modules.tab import tab_bp
-    # app.register_blueprint(tab_bp, url_prefix="/api/tab")
+    from modules.tab import tab_bp
+    app.register_blueprint(tab_bp, url_prefix="/api/tab")
 
     # from modules.clipboard import clipboard_bp
     # app.register_blueprint(clipboard_bp, url_prefix="/api/clipboard")
