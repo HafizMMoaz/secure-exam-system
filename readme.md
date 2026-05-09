@@ -19,6 +19,8 @@ See [installation.md](installation.md) for full setup and run instructions.
 - Module 7: Questions Randomization - done
 - Module 8: Secure Timer - done
 - Module 9: Input Validation – Injection prevention - done
+- Module 10: Tab Monitoring - done
+- Module 11: Clipboard Monitoring - done
 - Other modules: pending integration
 
 ## 2. Project Objective
