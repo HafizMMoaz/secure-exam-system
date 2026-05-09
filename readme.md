@@ -532,6 +532,7 @@ Before final submission, each module must pass:
 - Module 3: Device Fingerprinting - done
 - Module 4: Activation Code Security - done
 - Module 5: RBAC - done
+- Module 6: Questions Creation, Delivery, etc - done
 - Other modules: pending integration
 
 ## 29. Repository Notes
