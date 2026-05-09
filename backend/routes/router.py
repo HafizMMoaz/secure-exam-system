@@ -23,8 +23,8 @@ def register_routes(app):
     from modules.timer import timer_bp
     app.register_blueprint(timer_bp, url_prefix="/api/timer")
 
-    # from modules.validation import validation_bp
-    # app.register_blueprint(validation_bp, url_prefix="/api/validation")
+    from modules.validation import validation_bp
+    app.register_blueprint(validation_bp, url_prefix="/api/validation")
 
     # from modules.tab import tab_bp
     # app.register_blueprint(tab_bp, url_prefix="/api/tab")
