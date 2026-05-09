@@ -17,8 +17,8 @@ def register_routes(app):
     from modules.questions import questions_bp
     app.register_blueprint(questions_bp, url_prefix="/api/questions")
 
-    # from modules.randomization import randomization_bp
-    # app.register_blueprint(randomization_bp, url_prefix="/api/randomization")
+    from modules.randomization import randomization_bp
+    app.register_blueprint(randomization_bp, url_prefix="/api/randomization")
 
     # from modules.timer import timer_bp
     # app.register_blueprint(timer_bp, url_prefix="/api/timer")
