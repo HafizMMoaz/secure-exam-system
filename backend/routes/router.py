@@ -32,8 +32,8 @@ def register_routes(app):
     from modules.clipboard import clipboard_bp
     app.register_blueprint(clipboard_bp, url_prefix="/api/clipboard")
 
-    # from modules.activity import activity_bp
-    # app.register_blueprint(activity_bp, url_prefix="/api/activity")
+    from modules.activity import activity_bp
+    app.register_blueprint(activity_bp, url_prefix="/api/activity")
 
     from modules.logging import logging_bp
     app.register_blueprint(logging_bp, url_prefix="/api/logs")
