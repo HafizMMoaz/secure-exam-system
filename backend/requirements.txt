@@ -7,3 +7,4 @@ bcrypt>=4.1.0
 python-dotenv>=1.0.0
 requests>=2.0.0
 pytz>=2024.0
+scikit-learn>=1.4.0
