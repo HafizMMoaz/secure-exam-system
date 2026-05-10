@@ -35,6 +35,32 @@ function getErrorMessage(error: unknown) {
   return "Unknown error"
 }
 
+function StudentChrome({
+  user,
+  onLogout,
+  children,
+}: {
+  user: { username: string; role: string } | null
+  onLogout: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <div>
+      <header className="navbar">
+        <div className="navbar-brand">SecureExam</div>
+        <div className="navbar-right">
+          <span className="">{user?.username || "Unknown"}</span>
+          <span className="badge badge-zinc">{user?.role || "student"}</span>
+          <button type="button" className="btn btn-ghost" onClick={onLogout}>
+            Logout
+          </button>
+        </div>
+      </header>
+      {children}
+    </div>
+  )
+}
+
 export default function ExamPage() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -365,137 +391,149 @@ export default function ExamPage() {
 
   if (step === "DEVICE_REGISTRATION") {
     return (
-      <div className="auth-shell">
-        <div className="auth-box" style={{ width: "min(540px, 100%)", textAlign: "center" }}>
-          <div className="card" style={{ minHeight: 240 }}>
-            <div>
-              <div className="label">Device Registration</div>
-              <h2 style={{ marginTop: 18 }}>Registering your device...</h2>
-              <p>Please wait while we validate your browser fingerprint.</p>
+      <StudentChrome user={user} onLogout={handleLogout}>
+        <div className="auth-shell">
+          <div className="auth-box" style={{ width: "min(540px, 100%)", textAlign: "center" }}>
+            <div className="card" style={{ minHeight: 240 }}>
+              <div>
+                <div className="label">Device Registration</div>
+                <h2 style={{ marginTop: 18 }}>Registering your device...</h2>
+                <p>Please wait while we validate your browser fingerprint.</p>
+              </div>
             </div>
+            {error ? <div className="alert alert-error">{error}</div> : null}
           </div>
-          {error ? <div className="alert alert-error">{error}</div> : null}
         </div>
-      </div>
+      </StudentChrome>
     )
   }
 
   if (step === "EXAM_SELECTION") {
     return (
-      <div className="auth-shell">
-        <div className="auth-box" style={{ width: "min(560px, 100%)" }}>
-          <h1>Join your exam</h1>
-          <p className="muted">Enter the exam identifier provided by your teacher to continue.</p>
+      <StudentChrome user={user} onLogout={handleLogout}>
+        <div className="auth-shell">
+          <div className="auth-box" style={{ width: "min(560px, 100%)" }}>
+            <h1>Join your exam</h1>
+            <p className="muted">Enter the exam identifier provided by your teacher to continue.</p>
 
-          {error ? <div className="alert alert-error">{error}</div> : null}
+            {error ? <div className="alert alert-error">{error}</div> : null}
 
-          <form onSubmit={handleExamSelectionSubmit} className="card">
-            <label className="field">
-              <span className="label">Exam ID</span>
-              <input
-                type="text"
-                className="input"
-                value={examIdInput}
-                onChange={(event) => setExamIdInput(event.target.value)}
-                placeholder="Paste exam ID"
-                required
-              />
-            </label>
+            <form onSubmit={handleExamSelectionSubmit} className="card">
+              <label className="field">
+                <span className="label">Exam ID</span>
+                <input
+                  type="text"
+                  className="input"
+                  value={examIdInput}
+                  onChange={(event) => setExamIdInput(event.target.value)}
+                  placeholder="Paste exam ID"
+                  required
+                />
+              </label>
 
-            <button type="submit" className="btn btn-primary btn-full" disabled={loading}>
-              {loading ? <span className="spinner" aria-label="Loading" /> : "Continue"}
-            </button>
-          </form>
+              <button type="submit" className="btn btn-primary btn-full" disabled={loading}>
+                {loading ? <span className="spinner" aria-label="Loading" /> : "Continue"}
+              </button>
+            </form>
+          </div>
         </div>
-      </div>
+      </StudentChrome>
     )
   }
 
   if (step === "EXAM_WAITING") {
     return (
-      <div className="auth-shell">
-        <div className="auth-box" style={{ width: "min(620px, 100%)" }}>
-          <div className="card">
-          <span className="label">Waiting Room</span>
-          <h2 style={{ marginTop: 16 }}>Waiting for teacher approval...</h2>
-          <p style={{ marginBottom: 14 }}>
-            Exam ID: <strong>{examId}</strong>
-          </p>
-          <p>
-            Current state: <strong>{examState || "Checking..."}</strong>
-          </p>
-          {error ? <div className="alert alert-error" style={{ marginTop: 16 }}>{error}</div> : null}
+      <StudentChrome user={user} onLogout={handleLogout}>
+        <div className="auth-shell">
+          <div className="auth-box" style={{ width: "min(620px, 100%)" }}>
+            <div className="card">
+              <span className="label">Waiting Room</span>
+              <h2 style={{ marginTop: 16 }}>Waiting for teacher approval...</h2>
+              <p style={{ marginBottom: 14 }}>
+                Exam ID: <strong>{examId}</strong>
+              </p>
+              <p>
+                Current state: <strong>{examState || "Checking..."}</strong>
+              </p>
+              {error ? <div className="alert alert-error" style={{ marginTop: 16 }}>{error}</div> : null}
+            </div>
           </div>
         </div>
-      </div>
+      </StudentChrome>
     )
   }
 
   if (step === "ACTIVATION") {
     return (
-      <div className="auth-shell">
-        <div className="auth-box" style={{ width: "min(560px, 100%)" }}>
-          <h1>Enter your activation code</h1>
-          <p className="muted">The code unlocks your exam session after teacher approval.</p>
+      <StudentChrome user={user} onLogout={handleLogout}>
+        <div className="auth-shell">
+          <div className="auth-box" style={{ width: "min(560px, 100%)" }}>
+            <h1>Enter your activation code</h1>
+            <p className="muted">The code unlocks your exam session after teacher approval.</p>
 
-          {error ? <div className="alert alert-error">{error}</div> : null}
+            {error ? <div className="alert alert-error">{error}</div> : null}
 
-          <form onSubmit={handleActivationSubmit} className="card">
-            <label className="field">
-              <span className="label">Activation Code</span>
-              <input
-                type="text"
-                className="input"
-                value={activationCode}
-                onChange={(event) => setActivationCode(event.target.value)}
-                placeholder="Enter activation code"
-                required
-              />
-            </label>
+            <form onSubmit={handleActivationSubmit} className="card">
+              <label className="field">
+                <span className="label">Activation Code</span>
+                <input
+                  type="text"
+                  className="input"
+                  value={activationCode}
+                  onChange={(event) => setActivationCode(event.target.value)}
+                  placeholder="Enter activation code"
+                  required
+                />
+              </label>
 
-            <button type="submit" className="btn btn-primary btn-full" disabled={loading}>
-              {loading ? <span className="spinner" aria-label="Loading" /> : "Activate"}
-            </button>
-          </form>
+              <button type="submit" className="btn btn-primary btn-full" disabled={loading}>
+                {loading ? <span className="spinner" aria-label="Loading" /> : "Activate"}
+              </button>
+            </form>
+          </div>
         </div>
-      </div>
+      </StudentChrome>
     )
   }
 
   if (step === "RANDOMIZATION") {
     return (
-      <div className="auth-shell">
-        <div className="auth-box" style={{ width: "min(620px, 100%)", textAlign: "center" }}>
-          <div className="card" style={{ minHeight: 260 }}>
-            <div>
-              <div className="label">Randomization</div>
-              <h2 style={{ marginTop: 18 }}>Preparing your exam...</h2>
-              <p>Shuffling questions and starting the secure timer.</p>
+      <StudentChrome user={user} onLogout={handleLogout}>
+        <div className="auth-shell">
+          <div className="auth-box" style={{ width: "min(620px, 100%)", textAlign: "center" }}>
+            <div className="card" style={{ minHeight: 260 }}>
+              <div>
+                <div className="label">Randomization</div>
+                <h2 style={{ marginTop: 18 }}>Preparing your exam...</h2>
+                <p>Shuffling questions and starting the secure timer.</p>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </StudentChrome>
     )
   }
 
   if (step === "SUBMITTED") {
     return (
-      <div className="auth-shell">
-        <div className="auth-box" style={{ width: "min(680px, 100%)" }}>
-          <div className="card">
-          <span className="label">Submitted</span>
-          <h1 style={{ marginTop: 16 }}>
-            {examComplete ? "Exam Submitted Successfully" : "Submitting Exam..."}
-          </h1>
-          <p style={{ marginBottom: 24 }}>
-            Your responses have been recorded and are under review.
-          </p>
-          <button type="button" className="btn btn-ghost" onClick={handleLogout}>
-            Logout
-          </button>
+      <StudentChrome user={user} onLogout={handleLogout}>
+        <div className="auth-shell">
+          <div className="auth-box" style={{ width: "min(680px, 100%)" }}>
+            <div className="card">
+              <span className="label">Submitted</span>
+              <h1 style={{ marginTop: 16 }}>
+                {examComplete ? "Exam Submitted Successfully" : "Submitting Exam..."}
+              </h1>
+              <p style={{ marginBottom: 24 }}>
+                Your responses have been recorded and are under review.
+              </p>
+              <button type="button" className="btn btn-ghost" onClick={handleLogout}>
+                Logout
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      </StudentChrome>
     )
   }
 

@@ -41,6 +41,32 @@ export interface Question {
   order_index: number
 }
 
+export interface Exam {
+  exam_id: string
+  title: string
+  description: string
+  duration_minutes: number
+  state: string
+  created_at: string
+}
+
+export interface QuestionWithAnswer {
+  question_id: string
+  text: string
+  options: string[]
+  correct_answer: string
+  marks: number
+  order_index: number
+}
+
+export interface StudentUser {
+  user_id: string
+  username: string
+  role: string
+  is_active: boolean
+  joined_at?: string
+}
+
 export interface RiskScore {
   student_id: string
   username: string

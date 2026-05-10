@@ -1,5 +1,6 @@
 from datetime import timedelta
 import requests
+from pytz import utc
 
 from config.config import sessions_col, JWT_EXPIRY_MINUTES, BASE_URL, now
 from enums.module_name import ModuleName
@@ -16,6 +17,15 @@ def _iso_now():
     return now().replace(microsecond=0).isoformat() + "Z"
 
 
+def _normalize_dt(value):
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        # MongoDB stores naive datetimes as UTC
+        return utc.localize(value).astimezone(now().tzinfo)
+    return value.astimezone(now().tzinfo)
+
+
 def create_session(user_context):
     session_id = user_context.get("session_id")
     user_id = user_context.get("user_id")
@@ -30,15 +40,15 @@ def create_session(user_context):
     if existing:
         raise SessionAlreadyActiveException()
 
-    now = now()
-    expires_at = now + timedelta(minutes=JWT_EXPIRY_MINUTES)
+    current_time = now()
+    expires_at = current_time + timedelta(minutes=JWT_EXPIRY_MINUTES)
 
     doc = {
         "session_id": session_id,
         "user_id": user_id,
         "username": username,
         "role": role,
-        "created_at": now,
+        "created_at": current_time,
         "expires_at": expires_at,
         "is_active": True,
         "invalidated_at": None,
@@ -106,11 +116,12 @@ def validate_session(session_id):
     if not session:
         raise SessionNotFoundException()
 
-    now = now()
+    current_time = now()
     expires_at = session.get("expires_at")
     is_active = session.get("is_active", False)
+    expires_at = _normalize_dt(expires_at)
 
-    if not is_active or (expires_at and expires_at < now):
+    if not is_active or (expires_at and expires_at < current_time):
         raise UnauthorizedException("Session is no longer valid")
 
     return {
