@@ -10,18 +10,45 @@ import type { ApiResponse, ExamStep, Question } from "../../types"
 interface NextQuestionPayload {
   question: Question | null
   exam_complete: boolean
+  message?: string
 }
 
 interface ExamStatePayload {
   state: string
 }
 
+interface PublicExamPayload {
+  exam_id: string
+  title: string
+  description: string
+  duration_minutes: number
+  state: string
+  start_time: string
+  end_time: string
+  max_students: number
+  students_count: number
+}
+
+interface EnrollExamPayload {
+  already_enrolled: boolean
+  exam_id: string
+  start_time?: string
+  end_time?: string
+  duration_minutes?: number
+}
+
 interface TimerStartPayload {
   remaining_seconds: number
+  resumed?: boolean
+  start_time?: string
+  end_time?: string
+  duration_minutes?: number
 }
 
 type NextQuestionResponse = ApiResponse<NextQuestionPayload>
 type ExamStateResponse = ApiResponse<ExamStatePayload>
+type PublicExamResponse = ApiResponse<PublicExamPayload>
+type EnrollExamResponse = ApiResponse<EnrollExamPayload>
 type TimerStartResponse = ApiResponse<TimerStartPayload>
 
 function getErrorMessage(error: unknown) {
@@ -33,6 +60,19 @@ function getErrorMessage(error: unknown) {
   }
 
   return "Unknown error"
+}
+
+function formatLocalDateTime(value: string) {
+  if (!value) return "-"
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+function getRemainingSeconds(value: string, referenceTime: number) {
+  if (!value) return 0
+  const time = new Date(value).getTime()
+  if (Number.isNaN(time)) return 0
+  return Math.max(0, Math.ceil((time - referenceTime) / 1000))
 }
 
 function StudentChrome({
@@ -69,18 +109,25 @@ export default function ExamPage() {
   const [step, setStep] = useState<ExamStep>("DEVICE_REGISTRATION")
   const [examId, setExamId] = useState("")
   const [examIdInput, setExamIdInput] = useState("")
+  const [examTitle, setExamTitle] = useState("")
+  const [examDuration, setExamDuration] = useState(0)
+  const [examStartTime, setExamStartTimeStr] = useState("")
+  const [examEndTime, setExamEndTime] = useState("")
+  const [maxStudents, setMaxStudents] = useState(0)
+  const [studentsCount, setStudentsCount] = useState(0)
   const [activationCode, setActivationCode] = useState("")
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null)
   const [selectedAnswer, setSelectedAnswer] = useState("")
   const [questionStartTime, setQuestionStartTime] = useState<number>(0)
-  const [examStartTime, setExamStartTime] = useState<number>(0)
+  const [examTimerStartTime, setExamTimerStartTime] = useState<number>(0)
   const [submissionTimes, setSubmissionTimes] = useState<number[]>([])
   const [editCount, setEditCount] = useState(0)
   const [remainingSeconds, setRemainingSeconds] = useState(0)
+  const [currentTime, setCurrentTime] = useState(() => Date.now())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
-  const [examComplete, setExamComplete] = useState(false)
   const [examState, setExamState] = useState("")
+  const [resumeMessage, setResumeMessage] = useState("")
 
   const autoSubmitRef = useRef(false)
   const questionLoadRef = useRef(false)
@@ -95,6 +142,46 @@ export default function ExamPage() {
   const handleLogout = () => {
     logout()
     navigate("/login", { replace: true })
+  }
+
+  const clearExamSelectionDetails = () => {
+    setExamTitle("")
+    setExamDuration(0)
+    setExamStartTimeStr("")
+    setExamEndTime("")
+    setMaxStudents(0)
+    setStudentsCount(0)
+  }
+
+  const isExamJoinable =
+    Boolean(examStartTime) &&
+    Boolean(examEndTime) &&
+    currentTime >= new Date(examStartTime).getTime() &&
+    currentTime <= new Date(examEndTime).getTime()
+
+  const handleEnroll = async () => {
+    if (!examId) return
+
+    setLoading(true)
+    setError("")
+
+    try {
+      const response = await client.post<EnrollExamResponse>("/api/questions/exams/enroll", {
+        exam_id: examId,
+      })
+
+      if (response.data.data.already_enrolled) {
+        setResumeMessage("Resuming your exam session...")
+      } else {
+        setResumeMessage("")
+      }
+
+      setStep("EXAM_WAITING")
+    } catch (enrollError) {
+      setError(getErrorMessage(enrollError))
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleSubmitExam = useCallback(async () => {
@@ -122,10 +209,10 @@ export default function ExamPage() {
       // Best effort: the exam is still marked submitted even if analysis fails here.
     }
 
-    setExamComplete(true)
     setStep("SUBMITTED")
     setCurrentQuestion(null)
     setSelectedAnswer("")
+    setResumeMessage("")
     setLoading(false)
   }, [examId])
 
@@ -212,8 +299,19 @@ export default function ExamPage() {
         if (cancelled) return
 
         setRemainingSeconds(timerResponse.data.data.remaining_seconds ?? 0)
-        setExamStartTime(Date.now())
-        setStep("IN_PROGRESS")
+        setExamTimerStartTime(Date.now())
+
+        if (timerResponse.data.data.resumed) {
+          setResumeMessage("Resuming your exam...")
+          window.setTimeout(() => {
+            if (!cancelled) {
+              setStep("IN_PROGRESS")
+            }
+          }, 900)
+        } else {
+          setResumeMessage("")
+          setStep("IN_PROGRESS")
+        }
       } catch (randomizationError) {
         if (!cancelled) {
           setError(getErrorMessage(randomizationError))
@@ -233,7 +331,7 @@ export default function ExamPage() {
   }, [examId, step])
 
   useEffect(() => {
-    if (step !== "IN_PROGRESS" || !examId) return
+    if (step !== "IN_PROGRESS" || !examId || currentQuestion) return
 
     let cancelled = false
 
@@ -251,7 +349,9 @@ export default function ExamPage() {
         if (cancelled) return
 
         if (response.data.data.exam_complete || !response.data.data.question) {
-          await handleSubmitExam()
+          if (!autoSubmitRef.current) {
+            await handleSubmitExam()
+          }
           return
         }
 
@@ -277,7 +377,7 @@ export default function ExamPage() {
       cancelled = true
       questionLoadRef.current = false
     }
-  }, [examId, handleSubmitExam, step])
+  }, [currentQuestion, examId, handleSubmitExam, step])
 
   useEffect(() => {
     if (step !== "IN_PROGRESS") return
@@ -292,6 +392,16 @@ export default function ExamPage() {
   }, [step])
 
   useEffect(() => {
+    const timerId = window.setInterval(() => {
+      setCurrentTime(Date.now())
+    }, 1000)
+
+    return () => {
+      window.clearInterval(timerId)
+    }
+  }, [])
+
+  useEffect(() => {
     if (step !== "IN_PROGRESS" || remainingSeconds > 0 || autoSubmitRef.current) return
 
     void handleSubmitExam()
@@ -301,12 +411,26 @@ export default function ExamPage() {
     event.preventDefault()
     setLoading(true)
     setError("")
+    setResumeMessage("")
+    clearExamSelectionDetails()
 
     try {
-      const response = await client.get<ExamStateResponse>(`/api/auth/exam/state/${examIdInput.trim()}`)
-      setExamState(response.data.data.state)
-      setExamId(examIdInput.trim())
-      setStep("EXAM_WAITING")
+      const nextExamId = examIdInput.trim()
+      const response = await client.get<PublicExamResponse>(`/api/questions/exams/public/${nextExamId}`)
+      const exam = response.data.data
+
+      setExamId(nextExamId)
+      setExamTitle(exam.title)
+      setExamDuration(exam.duration_minutes)
+      setExamStartTimeStr(exam.start_time)
+      setExamEndTime(exam.end_time)
+      setMaxStudents(exam.max_students)
+      setStudentsCount(exam.students_count)
+
+      if (new Date(exam.start_time).getTime() > Date.now()) {
+        setError(`Exam starts at ${formatLocalDateTime(exam.start_time)}. Please come back then.`)
+        return
+      }
     } catch (selectionError) {
       setError(getErrorMessage(selectionError))
     } finally {
@@ -348,7 +472,7 @@ export default function ExamPage() {
     setError("")
 
     const answerTimeSeconds = (Date.now() - questionStartTime) / 1000
-    const submissionTimeSeconds = (Date.now() - examStartTime) / 1000
+    const submissionTimeSeconds = (Date.now() - examTimerStartTime) / 1000
 
     try {
       await client.post("/api/behavioral/event", {
@@ -409,6 +533,8 @@ export default function ExamPage() {
   }
 
   if (step === "EXAM_SELECTION") {
+    const canJoinExam = isExamJoinable
+
     return (
       <StudentChrome user={user} onLogout={handleLogout}>
         <div className="auth-shell">
@@ -416,7 +542,7 @@ export default function ExamPage() {
             <h1>Join your exam</h1>
             <p className="muted">Enter the exam identifier provided by your teacher to continue.</p>
 
-            {error ? <div className="alert alert-error">{error}</div> : null}
+            {error ? <div className="alert alert-warning">{error}</div> : null}
 
             <form onSubmit={handleExamSelectionSubmit} className="card">
               <label className="field">
@@ -435,6 +561,30 @@ export default function ExamPage() {
                 {loading ? <span className="spinner" aria-label="Loading" /> : "Continue"}
               </button>
             </form>
+
+            {examTitle ? (
+              <div className="card" style={{ display: "grid", gap: 16 }}>
+                <h2>{examTitle}</h2>
+                <div className="stats-grid">
+                  <div className="stat-card">
+                    <div className="stat-value">{examDuration}m</div>
+                    <div className="stat-label">Duration</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-value">{studentsCount}/{maxStudents}</div>
+                    <div className="stat-label">Enrolled</div>
+                  </div>
+                </div>
+                <p className="muted">Starts: {formatLocalDateTime(examStartTime)}</p>
+                <p className="muted">Ends: {formatLocalDateTime(examEndTime)}</p>
+                <p className="muted">{canJoinExam ? "You can join this exam now." : "This exam is not open for joining yet."}</p>
+                {canJoinExam ? (
+                  <button type="button" className="btn btn-primary btn-full" onClick={() => void handleEnroll()} disabled={loading}>
+                    {loading ? <span className="spinner" aria-label="Loading" /> : "Join Exam"}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
       </StudentChrome>
@@ -442,19 +592,35 @@ export default function ExamPage() {
   }
 
   if (step === "EXAM_WAITING") {
+    const countdownSeconds = examState === "TEACHER_APPROVED" ? 0 : getRemainingSeconds(examStartTime, currentTime)
+
     return (
       <StudentChrome user={user} onLogout={handleLogout}>
         <div className="auth-shell">
           <div className="auth-box" style={{ width: "min(620px, 100%)" }}>
             <div className="card">
               <span className="label">Waiting Room</span>
-              <h2 style={{ marginTop: 16 }}>Waiting for teacher approval...</h2>
+              <h2 style={{ marginTop: 16 }}>{examTitle || "Waiting for teacher approval..."}</h2>
               <p style={{ marginBottom: 14 }}>
                 Exam ID: <strong>{examId}</strong>
               </p>
               <p>
                 Current state: <strong>{examState || "Checking..."}</strong>
               </p>
+              {countdownSeconds > 0 && examState !== "TEACHER_APPROVED" ? (
+                <p className="muted">Exam opens in {formatTime(countdownSeconds)}</p>
+              ) : null}
+              <div className="stats-grid" style={{ marginTop: 16 }}>
+                <div className="stat-card">
+                  <div className="stat-value">{studentsCount}/{maxStudents}</div>
+                  <div className="stat-label">Enrolled</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-value">{formatLocalDateTime(examStartTime)}</div>
+                  <div className="stat-label">Start Time</div>
+                </div>
+              </div>
+              {resumeMessage ? <div className="alert alert-success" style={{ marginTop: 16 }}>{resumeMessage}</div> : null}
               {error ? <div className="alert alert-error" style={{ marginTop: 16 }}>{error}</div> : null}
             </div>
           </div>
@@ -506,6 +672,7 @@ export default function ExamPage() {
                 <div className="label">Randomization</div>
                 <h2 style={{ marginTop: 18 }}>Preparing your exam...</h2>
                 <p>Shuffling questions and starting the secure timer.</p>
+                {resumeMessage ? <div className="alert alert-success" style={{ marginTop: 16 }}>{resumeMessage}</div> : null}
               </div>
             </div>
           </div>
@@ -521,12 +688,8 @@ export default function ExamPage() {
           <div className="auth-box" style={{ width: "min(680px, 100%)" }}>
             <div className="card">
               <span className="label">Submitted</span>
-              <h1 style={{ marginTop: 16 }}>
-                {examComplete ? "Exam Submitted Successfully" : "Submitting Exam..."}
-              </h1>
-              <p style={{ marginBottom: 24 }}>
-                Your responses have been recorded and are under review.
-              </p>
+              <h1 style={{ marginTop: 16 }}>Exam Submitted</h1>
+              <p style={{ marginBottom: 24 }}>Your responses have been recorded.</p>
               <button type="button" className="btn btn-ghost" onClick={handleLogout}>
                 Logout
               </button>

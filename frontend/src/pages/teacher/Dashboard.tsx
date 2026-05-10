@@ -19,6 +19,7 @@ type ExamsResponse = ApiResponse<{ exams?: Exam[]; count?: number } | Exam[]>
 type CreateExamResponse = ApiResponse<{ exam_id: string; title: string; state: string }>
 type ApproveExamResponse = ApiResponse<{ exam_id: string; state: string }>
 type ExamStateResponse = ApiResponse<ExamStatePayload>
+type ExamDetailsResponse = ApiResponse<Exam>
 type QuestionsResponse = ApiResponse<{ questions?: QuestionWithAnswer[]; count?: number } | QuestionWithAnswer[]>
 type CreateQuestionResponse = ApiResponse<{ question_id: string }>
 type LogsResponse = ApiResponse<{ logs?: LogEntry[] } | LogEntry[]>
@@ -73,6 +74,12 @@ function getStateBadgeClass(state: string) {
   }
 }
 
+function formatLocalDateTime(value: string) {
+  if (!value) return "-"
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
 export default function Dashboard() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -84,6 +91,9 @@ export default function Dashboard() {
   const [newExamTitle, setNewExamTitle] = useState("")
   const [newExamDesc, setNewExamDesc] = useState("")
   const [newExamDuration, setNewExamDuration] = useState(60)
+  const [newExamMaxStudents, setNewExamMaxStudents] = useState(30)
+  const [newExamStartTime, setNewExamStartTime] = useState("")
+  const [newExamEndTime, setNewExamEndTime] = useState("")
   const [questionText, setQuestionText] = useState("")
   const [questionOptions, setQuestionOptions] = useState(["", "", "", ""])
   const [correctAnswer, setCorrectAnswer] = useState("")
@@ -96,6 +106,7 @@ export default function Dashboard() {
   const [success, setSuccess] = useState("")
   const [activationCode, setActivationCode] = useState("")
   const [examState, setExamState] = useState("")
+  const [selectedExam, setSelectedExam] = useState<Exam | null>(null)
 
   const highRiskCount = riskData.filter((item) => item.risk_level === "HIGH").length
   const canApproveExam = examState === "NOT_STARTED" || examState === "DEVICE_VERIFIED"
@@ -124,12 +135,14 @@ export default function Dashboard() {
     setSuccess("")
 
     try {
-      const [stateResponse, logsResponse] = await Promise.all([
+      const [stateResponse, detailsResponse, logsResponse] = await Promise.all([
         client.get<ExamStateResponse>(`/api/auth/exam/state/${targetExamId}`),
+        client.get<ExamDetailsResponse>(`/api/questions/exams/${targetExamId}`),
         client.get<LogsResponse>("/api/logs/list", { params: { exam_id: targetExamId } }),
       ])
 
       setExamState(stateResponse.data.data.state)
+      setSelectedExam(detailsResponse.data.data)
       setLogs(normalizeArray<LogEntry>(logsResponse.data.data, ["logs"]))
     } catch (overviewError) {
       setError(getErrorMessage(overviewError))
@@ -180,8 +193,25 @@ export default function Dashboard() {
       return
     }
 
+    if (!newExamStartTime || !newExamEndTime) {
+      setError("Start time and end time are required")
+      return
+    }
+
     if (newExamDuration < 10 || newExamDuration > 180) {
       setError("Duration must be between 10 and 180 minutes")
+      return
+    }
+
+    if (newExamMaxStudents < 1 || newExamMaxStudents > 200) {
+      setError("Max students must be between 1 and 200")
+      return
+    }
+
+    const startTimeDate = new Date(newExamStartTime)
+    const endTimeDate = new Date(newExamEndTime)
+    if (Number.isNaN(startTimeDate.getTime()) || Number.isNaN(endTimeDate.getTime())) {
+      setError("Start time and end time must be valid dates")
       return
     }
 
@@ -190,10 +220,15 @@ export default function Dashboard() {
     setSuccess("")
 
     try {
+      const startTimeIso = startTimeDate.toISOString()
+      const endTimeIso = endTimeDate.toISOString()
       const response = await client.post<CreateExamResponse>("/api/questions/exams/create", {
         title,
         description,
         duration_minutes: newExamDuration,
+        max_students: newExamMaxStudents,
+        start_time: startTimeIso,
+        end_time: endTimeIso,
       })
 
       const createdExam: Exam = {
@@ -203,12 +238,19 @@ export default function Dashboard() {
         duration_minutes: newExamDuration,
         state: response.data.data.state,
         created_at: new Date().toISOString(),
+        max_students: newExamMaxStudents,
+        students_count: 0,
+        start_time: startTimeIso,
+        end_time: endTimeIso,
       }
 
       setExams((current) => [createdExam, ...current])
       setNewExamTitle("")
       setNewExamDesc("")
       setNewExamDuration(60)
+      setNewExamMaxStudents(30)
+      setNewExamStartTime("")
+      setNewExamEndTime("")
       setSuccess("Exam created")
       setTab("exams")
     } catch (createError) {
@@ -494,6 +536,29 @@ export default function Dashboard() {
                 <input className="input" type="number" value={newExamDuration} onChange={(event) => setNewExamDuration(Number.parseInt(event.target.value || "0", 10) || 0)} />
               </div>
 
+              <div className="field">
+                <label className="label">Max Students</label>
+                <input
+                  className="input"
+                  type="number"
+                  min={1}
+                  max={200}
+                  value={newExamMaxStudents}
+                  onChange={(event) => setNewExamMaxStudents(Number.parseInt(event.target.value || "0", 10) || 0)}
+                  placeholder="30"
+                />
+              </div>
+
+              <div className="field">
+                <label className="label">Exam Start Time</label>
+                <input className="input" type="datetime-local" value={newExamStartTime} onChange={(event) => setNewExamStartTime(event.target.value)} />
+              </div>
+
+              <div className="field">
+                <label className="label">Exam End Time</label>
+                <input className="input" type="datetime-local" value={newExamEndTime} onChange={(event) => setNewExamEndTime(event.target.value)} />
+              </div>
+
               <button type="button" className="btn btn-primary" onClick={() => void handleCreateExam()} disabled={loading}>
                 {loading ? <span className="spinner" aria-label="Loading" /> : "Create Exam"}
               </button>
@@ -513,6 +578,9 @@ export default function Dashboard() {
                     <tr>
                       <th>Title</th>
                       <th>Duration</th>
+                      <th>Start Time</th>
+                      <th>End Time</th>
+                      <th>Enrolled/Max</th>
                       <th>State</th>
                       <th>Actions</th>
                     </tr>
@@ -522,6 +590,9 @@ export default function Dashboard() {
                       <tr key={exam.exam_id}>
                         <td>{exam.title}</td>
                         <td>{exam.duration_minutes} min</td>
+                        <td>{formatLocalDateTime(exam.start_time)}</td>
+                        <td>{formatLocalDateTime(exam.end_time)}</td>
+                        <td>{exam.students_count}/{exam.max_students}</td>
                         <td><span className={`badge ${getStateBadgeClass(exam.state)}`}>{exam.state}</span></td>
                         <td>
                           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -550,6 +621,33 @@ export default function Dashboard() {
 
             {examId ? (
               <>
+                {selectedExam ? (
+                  <div className="card" style={{ display: "grid", gap: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                      <div>
+                        <div className="label">Exam Info</div>
+                        <h2 style={{ marginTop: 12 }}>{selectedExam.title}</h2>
+                        <p className="muted">{selectedExam.description || "No description provided"}</p>
+                      </div>
+                      <span className={`badge ${getStateBadgeClass(selectedExam.state)}`}>{selectedExam.state}</span>
+                    </div>
+
+                    <div className="stats-grid">
+                      <div className="stat-card">
+                        <div className="stat-value">{selectedExam.duration_minutes}m</div>
+                        <div className="stat-label">Duration</div>
+                      </div>
+                      <div className="stat-card">
+                        <div className="stat-value">{selectedExam.students_count}/{selectedExam.max_students}</div>
+                        <div className="stat-label">Enrolled</div>
+                      </div>
+                    </div>
+
+                    <p className="muted">Starts: {formatLocalDateTime(selectedExam.start_time)}</p>
+                    <p className="muted">Ends: {formatLocalDateTime(selectedExam.end_time)}</p>
+                  </div>
+                ) : null}
+
                 <div className="stats-grid">
                   <div className="stat-card">
                     <div className="stat-value">{examState || "-"}</div>

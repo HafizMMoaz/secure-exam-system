@@ -5,7 +5,9 @@ from modules.questions.controller import (
   approve_exam_route,
   create,
   create_exam_route,
+  enroll_student_route,
   get_exam_route,
+  get_exam_public_route,
   list_all,
   list_exams_route,
   next_q,
@@ -218,6 +220,32 @@ def exam_detail_bp_route(exam_id):
     return get_exam_route(exam_id)
 
 
+@questions_bp.route("/exams/public/<exam_id>", methods=["GET"])
+@jwt_required
+def exam_public_bp_route(exam_id):
+    """
+    Get safe public exam details.
+    ---
+    tags:
+      - Questions
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: exam_id
+        type: string
+        required: true
+    responses:
+      200:
+        description: Public exam returned
+      401:
+        description: Invalid or missing JWT
+      404:
+        description: Exam not found
+    """
+    return get_exam_public_route(exam_id)
+
+
 @questions_bp.route("/exams/approve", methods=["POST"])
 @jwt_required
 @role_required("teacher")
@@ -255,3 +283,42 @@ def approve_exam_bp_route():
         description: Invalid exam state
     """
     return approve_exam_route()
+
+
+@questions_bp.route("/exams/enroll", methods=["POST"])
+@jwt_required
+@role_required("student")
+def enroll_student_bp_route():
+    """
+    Enroll the authenticated student into an exam.
+    ---
+    tags:
+      - Questions
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - exam_id
+          properties:
+            exam_id:
+              type: string
+    responses:
+      200:
+        description: Student enrolled
+      400:
+        description: Bad request
+      401:
+        description: Invalid or missing JWT
+      403:
+        description: Forbidden
+      404:
+        description: Exam not found
+      409:
+        description: Exam full or invalid state
+    """
+    return enroll_student_route()

@@ -7,7 +7,6 @@ logging_bp = Blueprint("logging_bp", __name__)
 
 
 @logging_bp.route("/write", methods=["POST"])
-@jwt_required
 def write_route():
     """
     Record a log entry.

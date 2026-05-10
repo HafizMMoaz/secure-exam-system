@@ -48,6 +48,10 @@ export interface Exam {
   duration_minutes: number
   state: string
   created_at: string
+  max_students: number
+  students_count: number
+  start_time: string
+  end_time: string
 }
 
 export interface QuestionWithAnswer {

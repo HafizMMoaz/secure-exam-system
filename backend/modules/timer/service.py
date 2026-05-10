@@ -2,6 +2,7 @@ import requests
 from datetime import timedelta
 from bson import ObjectId
 from pymongo.errors import PyMongoError
+from pytz import utc
 
 from config.config import exams_col, exam_sessions_col, BASE_URL, now
 from enums.module_name import ModuleName
@@ -20,7 +21,16 @@ from exceptions import (
 def _iso(dt):
     if dt is None:
         return None
-    return dt.replace(microsecond=0).isoformat() + "Z"
+    normalized = _normalize_dt(dt)
+    return normalized.astimezone(utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _normalize_dt(value):
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return utc.localize(value)
+    return value
 
 
 def _send_log(level, user_id, action, details):
@@ -31,7 +41,7 @@ def _send_log(level, user_id, action, details):
         "exam_id": details.get("exam_id") if details else "",
         "action": action,
         "details": details or {},
-        "timestamp": now().replace(microsecond=0).isoformat() + "Z",
+        "timestamp": now().astimezone(utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
     }
     try:
         requests.post(f"{BASE_URL}/api/logs/write", json=payload, timeout=2)
@@ -55,6 +65,15 @@ def start_exam(user_context, payload):
     if exam.get("state") != ExamState.ACTIVATION_VALID.value:
         raise ExamStateException(current_state=exam.get("state"), required_state=ExamState.ACTIVATION_VALID.value)
 
+    current_time = now()
+    start_time = _normalize_dt(exam.get("start_time"))
+    end_time = _normalize_dt(exam.get("end_time"))
+
+    if start_time and current_time < start_time:
+        raise BadRequestException("Exam has not started yet")
+    if end_time and current_time > end_time:
+        raise BadRequestException("Exam period has ended")
+
     user_id = (user_context or {}).get("user_id")
 
     # Check for existing active session
@@ -64,17 +83,26 @@ def start_exam(user_context, payload):
         raise DatabaseException(str(exc))
 
     if existing:
-        raise ConflictException("Exam already started for this student")
+        existing_end_time = _normalize_dt(existing.get("end_time"))
+        remaining = int((existing_end_time - current_time).total_seconds()) if existing_end_time else 0
+        return {
+            "exam_id": exam_id,
+            "start_time": _iso(existing.get("start_time")),
+            "end_time": _iso(existing_end_time or existing.get("end_time")),
+            "duration_minutes": existing.get("duration_minutes", int(exam.get("duration_minutes", 60))),
+            "remaining_seconds": max(0, remaining),
+            "resumed": True,
+        }
 
     duration_minutes = int(exam.get("duration_minutes", 60))
-    start_time = now()
-    end_time = start_time + timedelta(minutes=duration_minutes)
+    session_start_time = current_time
+    session_end_time = session_start_time + timedelta(minutes=duration_minutes)
 
     session_doc = {
         "exam_id": exam_id,
         "student_id": user_id,
-        "start_time": start_time,
-        "end_time": end_time,
+        "start_time": session_start_time,
+        "end_time": session_end_time,
         "duration_minutes": duration_minutes,
         "is_active": True,
         "submitted_at": None,
@@ -88,12 +116,12 @@ def start_exam(user_context, payload):
 
     _send_log(LogLevel.INFO.value, user_id, "exam_started", {"exam_id": exam_id, "student_id": user_id, "duration_minutes": duration_minutes})
 
-    remaining_seconds = int((end_time - now()).total_seconds())
+    remaining_seconds = int((session_end_time - current_time).total_seconds())
 
     return {
         "exam_id": exam_id,
-        "start_time": _iso(start_time),
-        "end_time": _iso(end_time),
+        "start_time": _iso(session_start_time),
+        "end_time": _iso(session_end_time),
         "duration_minutes": duration_minutes,
         "remaining_seconds": remaining_seconds if remaining_seconds > 0 else 0,
     }
