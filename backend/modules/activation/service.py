@@ -7,8 +7,9 @@ import requests
 from bson import ObjectId
 from bson.errors import InvalidId
 from pymongo.errors import PyMongoError
+from pytz import utc
 
-from config.config import activation_codes_col, exams_col, BASE_URL, now
+from config.config import activation_codes_col, exams_col, BASE_URL, APP_TZ, now
 from enums.exam_state import ExamState
 from enums.log_level import LogLevel
 from enums.module_name import ModuleName
@@ -25,6 +26,20 @@ def _iso_dt(value):
     if value is None:
         return None
     return value.replace(microsecond=0).isoformat() + "Z"
+
+
+def _normalize_dt(value):
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        # MongoDB stores naive datetimes as UTC
+        return utc.localize(value).astimezone(APP_TZ)
+    return value.astimezone(APP_TZ)
+
+
+def _is_expired(value):
+    normalized = _normalize_dt(value)
+    return bool(normalized and normalized < now())
 
 
 def _validate_exam_id(exam_id):
@@ -138,7 +153,7 @@ def validate_activation_code(user_context, payload):
         raise ActivationCodeAlreadyUsedException()
 
     expires_at = activation.get("expires_at")
-    if expires_at and expires_at < now():
+    if _is_expired(expires_at):
         _send_log(
             LogLevel.WARNING.value,
             "expired_activation_code",
@@ -203,7 +218,7 @@ def get_activation_status(exam_id):
         "used_at": _iso_dt(used_at),
         "created_at": _iso_dt(created_at),
         "expires_at": _iso_dt(expires_at),
-        "is_expired": bool(expires_at and expires_at < now()),
+        "is_expired": _is_expired(expires_at),
     }
 
 

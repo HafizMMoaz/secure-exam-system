@@ -5,10 +5,10 @@ from exceptions import register_error_handlers
 from config.swagger import init_swagger
 from routes import register_routes
 from routes.health import global_health as get_global_health
-from config.config import PORT
+from config.config import PORT, FRONTEND_URL
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=[FRONTEND_URL], supports_credentials=True)
 
 # ── Swagger docs at http://localhost:5000/api/docs ────────────────────────────
 init_swagger(app)

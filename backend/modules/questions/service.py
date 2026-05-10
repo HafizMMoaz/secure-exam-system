@@ -11,7 +11,9 @@ from enums.exam_state import ExamState
 from exceptions import (
     BadRequestException,
     DatabaseException,
+    ExamStateException,
     ExamNotFoundException,
+    ForbiddenException,
 )
 
 
@@ -35,6 +37,132 @@ def _send_log(level, user_id, action, details):
         requests.post(f"{BASE_URL}/api/logs/write", json=payload, timeout=2)
     except Exception:
         pass
+
+
+def _serialize_dt(value):
+    if value is None:
+        return None
+    return value.replace(microsecond=0).isoformat() + "Z"
+
+
+def _get_exam(exam_id):
+    try:
+        exam = exams_col.find_one({"_id": ObjectId(exam_id)})
+    except Exception:
+        raise ExamNotFoundException()
+
+    if not exam:
+        raise ExamNotFoundException()
+    return exam
+
+
+def _is_teacher_exam_owner(user_context, exam):
+    return str(exam.get("created_by")) == str((user_context or {}).get("user_id"))
+
+
+def create_exam(user_context, payload):
+    title = (payload or {}).get("title")
+    description = (payload or {}).get("description", "") or ""
+    duration_minutes = (payload or {}).get("duration_minutes")
+
+    if not title or not str(title).strip():
+        raise BadRequestException("title is required")
+    if duration_minutes is None:
+        raise BadRequestException("duration_minutes is required")
+
+    try:
+        duration_minutes = int(duration_minutes)
+    except (TypeError, ValueError):
+        raise BadRequestException("duration_minutes must be an integer")
+
+    if duration_minutes < 10 or duration_minutes > 180:
+        raise BadRequestException("duration_minutes must be between 10 and 180")
+
+    exam_document = {
+        "title": str(title).strip(),
+        "description": str(description).strip(),
+        "duration_minutes": duration_minutes,
+        "created_by": (user_context or {}).get("user_id"),
+        "created_at": now(),
+        "state": ExamState.NOT_STARTED.value,
+        "students_approved": [],
+    }
+
+    try:
+        result = exams_col.insert_one(exam_document)
+    except PyMongoError as exc:
+        raise DatabaseException(str(exc))
+
+    exam_id = str(result.inserted_id)
+    _send_log(LogLevel.INFO.value, (user_context or {}).get("user_id"), "exam_created", {"title": exam_document["title"], "exam_id": exam_id})
+
+    return {
+        "exam_id": exam_id,
+        "title": exam_document["title"],
+        "state": ExamState.NOT_STARTED.value,
+        "duration_minutes": duration_minutes,
+    }
+
+
+def list_exams(user_context):
+    try:
+        cursor = exams_col.find({"created_by": (user_context or {}).get("user_id")}).sort("created_at", -1)
+        exams = []
+        for exam in cursor:
+            exams.append(
+                {
+                    "exam_id": str(exam.get("_id")),
+                    "title": exam.get("title", ""),
+                    "description": exam.get("description", ""),
+                    "duration_minutes": exam.get("duration_minutes", 0),
+                    "state": exam.get("state"),
+                    "created_at": _serialize_dt(exam.get("created_at")),
+                }
+            )
+    except PyMongoError as exc:
+        raise DatabaseException(str(exc))
+
+    return {"exams": exams, "count": len(exams)}
+
+
+def get_exam(exam_id):
+    exam = _get_exam(exam_id)
+    return {
+        "exam_id": str(exam.get("_id")),
+        "title": exam.get("title", ""),
+        "description": exam.get("description", ""),
+        "duration_minutes": exam.get("duration_minutes", 0),
+        "state": exam.get("state"),
+        "created_at": _serialize_dt(exam.get("created_at")),
+        "created_by": exam.get("created_by"),
+    }
+
+
+def approve_exam(user_context, payload):
+    exam_id = (payload or {}).get("exam_id")
+    if not exam_id:
+        raise BadRequestException("exam_id is required")
+
+    exam = _get_exam(str(exam_id).strip())
+
+    if not _is_teacher_exam_owner(user_context, exam):
+        raise ForbiddenException("You are not allowed to approve this exam")
+
+    current_state = exam.get("state")
+    if current_state not in {ExamState.NOT_STARTED.value, ExamState.DEVICE_VERIFIED.value}:
+        raise ExamStateException("Exam already approved or past approval stage")
+
+    try:
+        exams_col.update_one(
+            {"_id": exam.get("_id")},
+            {"$set": {"state": ExamState.TEACHER_APPROVED.value}},
+        )
+    except PyMongoError as exc:
+        raise DatabaseException(str(exc))
+
+    _send_log(LogLevel.INFO.value, (user_context or {}).get("user_id"), "exam_approved", {"exam_id": str(exam.get("_id"))})
+
+    return {"exam_id": str(exam.get("_id")), "state": ExamState.TEACHER_APPROVED.value}
 
 
 def create_question(user_context, payload):
