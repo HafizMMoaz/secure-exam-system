@@ -51,18 +51,26 @@ flask run
 git checkout -b feature/your-descriptive-name
 ```
 
-5) Make changes and run tests locally
+5) Make changes and run tests locally before committing or pushing
 
 - Edit code in `backend/modules/...` or other files.
-- Run unit tests (if present):
+- Run unit tests and verification checks before you push:
 
 ```powershell
 pytest
 ```
 
+- If you changed the frontend, also run:
+
+```powershell
+cd frontend
+npm run lint
+npm run build
+```
+
 - Smoke-test endpoints using curl, Postman, or an HTTP client.
 
-6) Commit and push your branch
+6) Commit and push your branch only after all tests pass
 
 ```powershell
 git add .
