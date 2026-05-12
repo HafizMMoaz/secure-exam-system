@@ -104,7 +104,7 @@ def analyze_exam_similarity(user_context, exam_id):
         grouped[str(response.get("question_id"))].append(
             {
                 "student_id": str(response.get("student_id")),
-                "answer_text": response.get("answer_text", "") or "",
+                "answer_text": response.get("answer_text", response.get("answer", "")) or "",
             }
         )
 

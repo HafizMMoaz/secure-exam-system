@@ -512,7 +512,7 @@ def save_answer(user_context, payload):
             },
             {
                 "$set": {
-                    "answer": answer,
+                    "answer_text": answer,
                     "time_taken_seconds": time_taken_seconds,
                     "updated_at": now(),
                 },
@@ -542,7 +542,7 @@ def get_student_answers(user_context, exam_id):
         cursor = responses_col.find({"exam_id": exam_id, "student_id": student_id})
         answers = {}
         for response in cursor:
-            answers[str(response.get("question_id"))] = response.get("answer", "")
+            answers[str(response.get("question_id"))] = response.get("answer_text", response.get("answer", ""))
     except PyMongoError as exc:
         raise DatabaseException(str(exc))
 

@@ -100,8 +100,28 @@ def compute_exam_risk(user_context, exam_id, auth_header):
         raise ForbiddenException("Only teachers can compute risk scores")
 
     exam = _load_exam(exam_id)
-    if exam.get("state") != ExamState.ANALYZING.value:
-        raise ExamStateException(current_state=exam.get("state"), required_state=ExamState.ANALYZING.value)
+    current_state = exam.get("state")
+    if current_state not in (ExamState.SUBMITTED.value, ExamState.ANALYZING.value):
+        raise ExamStateException(
+            current_state=current_state,
+            required_state=f"{ExamState.SUBMITTED.value} or {ExamState.ANALYZING.value}",
+        )
+
+    # SUBMITTED → ANALYZING transition (per PRD §27.4). Idempotent if already ANALYZING.
+    if current_state == ExamState.SUBMITTED.value:
+        try:
+            exams_col.update_one(
+                {"_id": exam.get("_id")},
+                {"$set": {"state": ExamState.ANALYZING.value}},
+            )
+        except PyMongoError as exc:
+            raise DatabaseException(str(exc))
+        _send_log(
+            LogLevel.INFO.value,
+            (user_context or {}).get("user_id"),
+            "exam_state_transition",
+            {"exam_id": exam_id, "from": ExamState.SUBMITTED.value, "to": ExamState.ANALYZING.value},
+        )
 
     student_ids = _get_student_ids(exam_id)
     results = []
@@ -176,7 +196,11 @@ def get_dashboard(exam_id):
         else:
             low_risk_count += 1
 
-        user_doc = users_col.find_one({"user_id": record.get("student_id")}) or {}
+        student_id = record.get("student_id")
+        try:
+            user_doc = users_col.find_one({"_id": ObjectId(student_id)}) or {}
+        except Exception:
+            user_doc = users_col.find_one({"_id": student_id}) or {}
         students.append(
             {
                 "student_id": record.get("student_id"),

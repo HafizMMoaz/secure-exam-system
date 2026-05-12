@@ -23,7 +23,7 @@ type ExamDetailsResponse = ApiResponse<Exam>
 type QuestionsResponse = ApiResponse<{ questions?: QuestionWithAnswer[]; count?: number } | QuestionWithAnswer[]>
 type CreateQuestionResponse = ApiResponse<{ question_id: string }>
 type LogsResponse = ApiResponse<{ logs?: LogEntry[] } | LogEntry[]>
-type RiskResponse = ApiResponse<{ scores?: RiskScore[] } | RiskScore[]>
+type RiskResponse = ApiResponse<{ students?: RiskScore[]; scores?: RiskScore[] } | RiskScore[]>
 type StudentsResponse = ApiResponse<{ users?: StudentUser[] } | StudentUser[]>
 
 function getErrorMessage(error: unknown) {
@@ -497,7 +497,7 @@ export default function Dashboard() {
 
     try {
       const response = await client.get<RiskResponse>(`/api/risk/dashboard/${examId}`)
-      setRiskData(normalizeArray<RiskScore>(response.data.data, ["scores"]))
+      setRiskData(normalizeArray<RiskScore>(response.data.data, ["students", "scores"]))
     } catch (riskLoadError) {
       setError(getErrorMessage(riskLoadError))
     } finally {
@@ -1273,8 +1273,8 @@ export default function Dashboard() {
                       <td>{row.username}</td>
                       <td>{row.score}</td>
                       <td><span className={`badge ${getStateBadgeClass(row.risk_level)}`}>{row.risk_level}</span></td>
-                      <td>{row.metrics.tab_switches ?? 0}</td>
-                      <td>{row.metrics.fast_answers ?? 0}</td>
+                      <td>{row.metrics.tab_switch_count ?? row.metrics.tab_switches ?? 0}</td>
+                      <td>{row.metrics.fast_answer_count ?? row.metrics.fast_answers ?? 0}</td>
                     </tr>
                   ))}
                 </tbody>
