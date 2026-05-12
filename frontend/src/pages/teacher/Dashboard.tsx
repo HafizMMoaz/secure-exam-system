@@ -69,6 +69,12 @@ function getStateBadgeClass(state: string) {
     case "SUBMITTED":
     case "COMPLETED":
       return "badge-white"
+    case "HIGH":
+      return "badge-red"
+    case "MEDIUM":
+      return "badge-orange"
+    case "LOW":
+      return "badge-green"
     default:
       return "badge-zinc"
   }
@@ -104,6 +110,8 @@ export default function Dashboard() {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [riskData, setRiskData] = useState<RiskScore[]>([])
   const [students, setStudents] = useState<StudentUser[]>([])
+  const [liveEvents, setLiveEvents] = useState<Array<{ kind: string; user_id?: string; timestamp?: string }>>([])
+  const [liveConnected, setLiveConnected] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
@@ -1252,6 +1260,56 @@ export default function Dashboard() {
 
         {tab === "risk" ? (
           <section className="card" style={{ display: "grid", gap: 16 }}>
+            <div style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", gap: 8 }}>
+                <span className={`badge ${liveConnected ? "badge-green" : "badge-zinc"}`}>
+                  {liveConnected ? "Live: connected" : "Live: offline"}
+                </span>
+                {liveEvents.length > 0 ? (
+                  <span className="badge badge-orange">{liveEvents.length} events</span>
+                ) : null}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={!examId || liveConnected}
+                  onClick={() => {
+                    if (!examId) return
+                    const token = localStorage.getItem("token") || ""
+                    const url = `${client.defaults.baseURL || ""}/api/risk/stream/${examId}?token=${encodeURIComponent(token)}`
+                    const es = new EventSource(url)
+                    es.addEventListener("stream_open", () => setLiveConnected(true))
+                    const handle = (kind: string) => (e: MessageEvent) => {
+                      try {
+                        const data = JSON.parse(e.data)
+                        setLiveEvents((prev) => [{ kind, user_id: data.user_id, timestamp: data.timestamp }, ...prev].slice(0, 50))
+                      } catch {/* drop malformed */}
+                    }
+                    ;["tab_event", "clipboard_event", "activity_event", "behavioral_event"].forEach((k) => {
+                      es.addEventListener(k, handle(k))
+                    })
+                    es.onerror = () => setLiveConnected(false)
+                    ;(window as unknown as { __examEs?: EventSource }).__examEs = es
+                  }}
+                >
+                  Start live stream
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={!liveConnected}
+                  onClick={() => {
+                    const w = window as unknown as { __examEs?: EventSource }
+                    w.__examEs?.close()
+                    delete w.__examEs
+                    setLiveConnected(false)
+                  }}
+                >
+                  Stop
+                </button>
+              </div>
+            </div>
             <button type="button" className="btn btn-primary" onClick={() => void handleLoadRiskScores()} disabled={loading || !examId}>
               {loading ? <span className="spinner" aria-label="Loading" /> : "Load Risk Scores"}
             </button>
@@ -1280,6 +1338,30 @@ export default function Dashboard() {
                 </tbody>
               </table>
             </div>
+
+            {liveEvents.length > 0 ? (
+              <div className="table-wrap">
+                <h4 style={{ margin: "8px 0" }}>Live monitoring feed (last 50)</h4>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Kind</th>
+                      <th>Student</th>
+                      <th>When</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {liveEvents.map((ev, idx) => (
+                      <tr key={`${ev.kind}-${idx}`}>
+                        <td><span className="badge badge-orange">{ev.kind}</span></td>
+                        <td>{ev.user_id || "-"}</td>
+                        <td>{ev.timestamp ? formatLocalDateTime(ev.timestamp) : "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
           </section>
         ) : null}
 

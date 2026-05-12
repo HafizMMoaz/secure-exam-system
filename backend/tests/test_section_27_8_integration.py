@@ -215,6 +215,30 @@ def test_otp_wrong_code_rejected(base_url, db):
     assert r.status_code == 401, r.text
 
 
+# 9. SSE live-monitoring stream (Phase 4 / §24 bonus)
+def test_sse_stream_emits_stream_open_event(base_url, db, teacher_token, seeded_exam):
+    """
+    The SSE endpoint must immediately emit a `stream_open` event when a
+    teacher connects. We accept the JWT via ?token= because EventSource
+    cannot set custom headers.
+    """
+    token, _ = teacher_token
+    url = f"{base_url}/api/risk/stream/{seeded_exam['exam_id']}?token={token}"
+    with requests.get(url, stream=True, timeout=5) as r:
+        assert r.status_code == 200
+        assert r.headers.get("Content-Type", "").startswith("text/event-stream")
+        # Read just enough to see the first event.
+        chunks = []
+        for line in r.iter_lines(decode_unicode=True):
+            chunks.append(line)
+            if line.startswith("data:"):
+                break
+            if len(chunks) > 6:
+                break
+        joined = "\n".join(chunks)
+        assert "stream_open" in joined, f"no stream_open event: {joined!r}"
+
+
 # 8. Module 9 input validation integration (Phase 5.5)
 def test_nosql_injection_in_login_returns_400(base_url):
     """
