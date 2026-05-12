@@ -110,6 +110,7 @@ def start_exam(user_context, payload):
 
     try:
         exam_sessions_col.insert_one(session_doc)
+        # §27.6 (refined): Module 8 owns `state: IN_PROGRESS` — see ARCHITECTURE.md.
         exams_col.update_one({"_id": ObjectId(exam_id)}, {"$set": {"state": ExamState.IN_PROGRESS.value}})
     except PyMongoError as exc:
         raise DatabaseException(str(exc))
@@ -187,6 +188,7 @@ def submit_exam(user_context, payload):
 
     try:
         exam_sessions_col.update_one({"_id": session.get("_id")}, {"$set": {"is_active": False, "submitted_at": now()}})
+        # §27.6 (refined): Module 8 owns `state: SUBMITTED` — see ARCHITECTURE.md.
         exams_col.update_one({"_id": ObjectId(exam_id)}, {"$set": {"state": ExamState.SUBMITTED.value}})
     except PyMongoError as exc:
         raise DatabaseException(str(exc))

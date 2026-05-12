@@ -107,7 +107,8 @@ def compute_exam_risk(user_context, exam_id, auth_header):
             required_state=f"{ExamState.SUBMITTED.value} or {ExamState.ANALYZING.value}",
         )
 
-    # SUBMITTED → ANALYZING transition (per PRD §27.4). Idempotent if already ANALYZING.
+    # §27.4 SUBMITTED → ANALYZING transition; idempotent if already ANALYZING.
+    # §27.6 (refined): Module 17 owns `state: ANALYZING/COMPLETED` — see ARCHITECTURE.md.
     if current_state == ExamState.SUBMITTED.value:
         try:
             exams_col.update_one(
@@ -157,6 +158,7 @@ def compute_exam_risk(user_context, exam_id, auth_header):
         results.append({"student_id": student_id, "score": score, "risk_level": risk_level, "metrics": metrics})
 
     try:
+        # §27.6 (refined): Module 17 owns `state: COMPLETED` — see ARCHITECTURE.md.
         exams_col.update_one({"_id": exam.get("_id")}, {"$set": {"state": ExamState.COMPLETED.value}})
     except PyMongoError as exc:
         raise DatabaseException(str(exc))

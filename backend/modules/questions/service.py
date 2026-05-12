@@ -1,3 +1,8 @@
+# §27.6 (refined): Module 6 owns the exam document body (title, duration, totals,
+# enrollment list, teacher approval), all question CRUD, and student response writes
+# (`answer_text`, `time_taken_seconds`, edit counts). State-machine writes to
+# `exams_col.state` are NOT owned here — those belong to Modules 4, 8, and 17.
+# Full rationale: ARCHITECTURE.md.
 import hashlib
 import json
 import requests
@@ -237,6 +242,7 @@ def approve_exam(user_context, payload):
     if count == 0:
         raise BadRequestException("Cannot approve exam with no questions. Add at least one question first.")
 
+    # §27.6 (refined): Module 6 owns `state: TEACHER_APPROVED` — see ARCHITECTURE.md.
     try:
         exams_col.update_one(
             {"_id": exam.get("_id")},

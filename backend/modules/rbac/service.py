@@ -143,6 +143,7 @@ def toggle_user_status(user_id, actor_user_id=None):
 
     new_value = not bool(user.get("is_active", False))
 
+    # §27.6 (refined): Module 5 owns `is_active` — see ARCHITECTURE.md.
     try:
         users_col.update_one(
             {"_id": user.get("_id")},
