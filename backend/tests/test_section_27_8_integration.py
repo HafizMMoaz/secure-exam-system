@@ -131,3 +131,177 @@ def test_risk_compute_in_wrong_state_returns_409(base_url, seeded_exam, teacher_
         timeout=10,
     )
     assert r.status_code == 409, f"expected 409, got {r.status_code}: {r.text[:200]}"
+
+
+# 5. OTP MFA flow (Phase 5.3)
+def test_otp_mfa_round_trip(base_url, db):
+    """
+    Register a user, request OTP (Step 1), pick the code out of the
+    logs collection (dev delivery channel), verify OTP (Step 2), and
+    confirm the returned JWT unlocks /api/auth/profile.
+    """
+    import bcrypt
+    from bson import ObjectId
+
+    user_id = ObjectId()
+    db.users.insert_one({
+        "_id": user_id,
+        "username": "otp_user",
+        "password_hash": bcrypt.hashpw(b"correcthorse", bcrypt.gensalt()).decode(),
+        "role": "teacher",
+        "is_active": True,
+    })
+
+    r = requests.post(
+        f"{base_url}/api/auth/otp/request",
+        json={"username": "otp_user", "password": "correcthorse"},
+        timeout=5,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["otp_sent"] is True
+
+    deadline = time.monotonic() + 2.0
+    log_doc = None
+    while time.monotonic() < deadline:
+        log_doc = db.logs.find_one({"action": "otp_issued", "user_id": str(user_id)})
+        if log_doc:
+            break
+        time.sleep(0.1)
+    assert log_doc is not None, "otp_issued log never appeared"
+    code = log_doc.get("details", {}).get("code")
+    assert code and len(code) == 6, f"OTP code not in log details: {log_doc}"
+
+    r = requests.post(
+        f"{base_url}/api/auth/otp/verify",
+        json={"username": "otp_user", "code": code},
+        timeout=5,
+    )
+    assert r.status_code == 200, r.text
+    token = r.json()["data"]["token"]
+    assert token
+
+    r = requests.get(
+        f"{base_url}/api/auth/profile",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=5,
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_otp_wrong_code_rejected(base_url, db):
+    import bcrypt
+    from bson import ObjectId
+
+    user_id = ObjectId()
+    db.users.insert_one({
+        "_id": user_id,
+        "username": "otp_bad",
+        "password_hash": bcrypt.hashpw(b"x", bcrypt.gensalt()).decode(),
+        "role": "teacher",
+        "is_active": True,
+    })
+
+    requests.post(
+        f"{base_url}/api/auth/otp/request",
+        json={"username": "otp_bad", "password": "x"},
+        timeout=5,
+    )
+
+    r = requests.post(
+        f"{base_url}/api/auth/otp/verify",
+        json={"username": "otp_bad", "code": "000000"},
+        timeout=5,
+    )
+    assert r.status_code == 401, r.text
+
+
+# 8. Module 9 input validation integration (Phase 5.5)
+def test_nosql_injection_in_login_returns_400(base_url):
+    """
+    Login body containing a Mongo operator string must be rejected by
+    the @validate_body wrapper. Without Module 9, this string would be
+    passed verbatim into a pymongo find_one.
+    """
+    r = requests.post(
+        f"{base_url}/api/auth/login",
+        json={"username": {"$ne": None}, "password": "x"},
+        timeout=5,
+    )
+    # The validator rejects nested operators as a NoSQL-style payload.
+    assert r.status_code == 400, f"got {r.status_code}: {r.text[:200]}"
+
+
+def test_xss_in_register_username_returns_400(base_url):
+    r = requests.post(
+        f"{base_url}/api/auth/register",
+        json={"username": "<script>alert(1)</script>", "password": "x", "role": "student"},
+        timeout=5,
+    )
+    assert r.status_code == 400, f"got {r.status_code}: {r.text[:200]}"
+
+
+# 7. Rate limiting on auth (Phase 5.4)
+def test_login_rate_limit_kicks_in(base_url):
+    """
+    /api/auth/login is limited to 5 per minute per IP. The 6th request
+    within a minute must return 429.
+    """
+    seen_429 = False
+    for _ in range(8):
+        r = requests.post(
+            f"{base_url}/api/auth/login",
+            json={"username": "no_such_user", "password": "x"},
+            timeout=5,
+        )
+        if r.status_code == 429:
+            seen_429 = True
+            break
+    assert seen_429, "expected 429 within 8 rapid login attempts"
+
+
+# 6. Log integrity verification (Phase 5.1)
+def test_log_integrity_verify_detects_tamper(base_url, db, teacher_token):
+    """
+    Write a log via the gateway, hand-edit the stored document in Mongo,
+    then call /api/logs/verify and assert the entry surfaces as tampered.
+    Demonstrates the §27.3 SHA-256 integrity claim.
+    """
+    token, user_id = teacher_token
+    action = f"pytest_tamper_{int(time.time() * 1000)}"
+
+    payload = {
+        "module": "Module_1_Auth",
+        "level": "INFO",
+        "user_id": user_id,
+        "exam_id": "test_exam",
+        "action": action,
+        "details": {"note": "original"},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    r = requests.post(
+        f"{base_url}/api/logs/write",
+        json=payload,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=5,
+    )
+    assert r.status_code in (200, 202)
+
+    # Tamper directly in Mongo without recomputing the hash.
+    result = db.logs.update_one(
+        {"action": action},
+        {"$set": {"details": {"note": "TAMPERED"}}},
+    )
+    assert result.modified_count == 1
+
+    r = requests.get(
+        f"{base_url}/api/logs/verify?action={action}",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    assert r.status_code == 200, r.text[:200]
+    data = r.json().get("data", {})
+    tampered_actions = [t.get("action") for t in data.get("tampered", [])]
+    assert action in tampered_actions, (
+        f"tampered entry not detected. data={data}"
+    )
+    assert data.get("all_intact") is False

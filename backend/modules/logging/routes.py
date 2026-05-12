@@ -1,7 +1,7 @@
 from flask import Blueprint
 
 from middleware.jwt_auth import jwt_required, role_required
-from modules.logging.controller import write, verify, list_entries, health
+from modules.logging.controller import write, verify, verify_window_route, list_entries, health
 
 logging_bp = Blueprint("logging_bp", __name__)
 
@@ -85,6 +85,47 @@ def verify_route(log_id):
         description: Log entry not found
     """
     return verify(log_id)
+
+
+@logging_bp.route("/verify", methods=["GET"])
+@jwt_required
+@role_required("teacher")
+def verify_window_bp_route():
+    """
+    Verify integrity of a window of log entries — recomputes SHA-256 over each
+    log document and reports any that fail. Demonstrates the §27.3 integrity
+    guarantee against direct DB tampering.
+    ---
+    tags:
+      - Logging
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: query
+        name: user_id
+        type: string
+      - in: query
+        name: exam_id
+        type: string
+      - in: query
+        name: level
+        type: string
+      - in: query
+        name: module
+        type: string
+      - in: query
+        name: limit
+        type: integer
+        default: 500
+    responses:
+      200:
+        description: Verification summary
+      401:
+        description: Invalid or missing JWT
+      403:
+        description: Insufficient permissions
+    """
+    return verify_window_route()
 
 
 @logging_bp.route("/list", methods=["GET"])

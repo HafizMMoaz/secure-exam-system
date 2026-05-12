@@ -41,6 +41,7 @@ activity_events_col = db["activity_events"]
 multisession_attempts_col = db["multisession_attempts"]
 behavioral_events_col = db["behavioral_events"]
 similarity_results_col = db["similarity_results"]
+otp_codes_col = db["otp_codes"]
 
 
 def now():

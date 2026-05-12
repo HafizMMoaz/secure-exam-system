@@ -108,6 +108,76 @@ def verify_log(log_id):
     }
 
 
+def verify_window(filters):
+    """
+    Recompute SHA-256 integrity hashes over a window of logs and flag
+    any tampered entries. Use it to demonstrate the §27.3 integrity claim:
+    tamper with a log document in Mongo, then call this endpoint and
+    see the entry surface as not-intact.
+
+    Accepted query filters: same shape as list_logs (user_id, exam_id,
+    level, module) plus an optional `limit` (default 500, max 5000).
+    """
+    query = {}
+    if filters.get("user_id"):
+        query["user_id"] = filters.get("user_id")
+    if filters.get("exam_id") is not None:
+        query["exam_id"] = filters.get("exam_id")
+    if filters.get("level"):
+        query["level"] = filters.get("level")
+    if filters.get("module"):
+        query["module"] = filters.get("module")
+    if filters.get("action"):
+        query["action"] = filters.get("action")
+
+    try:
+        limit = int(filters.get("limit") or 500)
+    except (TypeError, ValueError):
+        raise BadRequestException("limit must be an integer")
+    limit = max(1, min(limit, 5000))
+
+    try:
+        cursor = logs_col.find(query).sort("received_at", -1).limit(limit)
+    except PyMongoError as exc:
+        raise DatabaseException(str(exc))
+
+    total = 0
+    intact = 0
+    tampered = []
+    for log in cursor:
+        total += 1
+        content = {
+            "module": log.get("module"),
+            "level": log.get("level"),
+            "user_id": log.get("user_id"),
+            "exam_id": log.get("exam_id") or "",
+            "action": log.get("action"),
+            "details": log.get("details") or {},
+            "timestamp": log.get("timestamp"),
+        }
+        computed = _compute_integrity(content)
+        stored = log.get("integrity_hash")
+        if computed == stored:
+            intact += 1
+        else:
+            tampered.append({
+                "log_id": str(log.get("_id")),
+                "module": log.get("module"),
+                "action": log.get("action"),
+                "timestamp": log.get("timestamp"),
+                "stored_hash": stored,
+                "computed_hash": computed,
+            })
+
+    return {
+        "checked": total,
+        "intact": intact,
+        "tampered_count": len(tampered),
+        "tampered": tampered,
+        "all_intact": len(tampered) == 0,
+    }
+
+
 def list_logs(filters):
     query = {}
     if filters.get("user_id"):

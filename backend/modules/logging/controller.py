@@ -3,7 +3,7 @@ from flask import request
 from middleware.jwt_auth import jwt_required, role_required
 from responses import accepted_response, success_response, health_response
 
-from modules.logging.service import write_log, verify_log, list_logs
+from modules.logging.service import write_log, verify_log, verify_window, list_logs
 from enums.module_name import ModuleName
 
 
@@ -15,6 +15,19 @@ def write():
 
 def verify(log_id):
     data = verify_log(log_id)
+    return success_response(data=data)
+
+
+def verify_window_route():
+    filters = {
+        "user_id": request.args.get("user_id"),
+        "exam_id": request.args.get("exam_id"),
+        "level": request.args.get("level"),
+        "module": request.args.get("module"),
+        "action": request.args.get("action"),
+        "limit": request.args.get("limit"),
+    }
+    data = verify_window(filters)
     return success_response(data=data)
 
 

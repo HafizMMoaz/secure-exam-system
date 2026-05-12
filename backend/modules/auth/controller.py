@@ -8,6 +8,8 @@ from modules.auth.service import (
     get_profile,
     login_user,
     register_user,
+    request_otp,
+    verify_otp,
 )
 
 
@@ -21,6 +23,18 @@ def login():
     payload = request.get_json(silent=True) or {}
     data = login_user(payload)
     return success_response(data=data, message="")
+
+
+def otp_request_action():
+    payload = request.get_json(silent=True) or {}
+    data = request_otp(payload)
+    return success_response(data=data, message="OTP issued")
+
+
+def otp_verify_action():
+    payload = request.get_json(silent=True) or {}
+    data = verify_otp(payload)
+    return success_response(data=data, message="OTP verified")
 
 
 def profile():

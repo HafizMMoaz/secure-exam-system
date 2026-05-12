@@ -7,6 +7,7 @@ from routes import register_routes
 from routes.health import global_health as get_global_health
 from config.config import PORT, FRONTEND_URL
 from jobs import start_auto_submit_job
+from middleware.rate_limit import limiter
 
 app = Flask(__name__)
 CORS(app, origins=[FRONTEND_URL], supports_credentials=True)
@@ -16,6 +17,9 @@ init_swagger(app)
 
 # ── Register global error handlers ────────────────────────────────────────────
 register_error_handlers(app)
+
+# ── Rate limiting (Phase 5.4) ─────────────────────────────────────────────────
+limiter.init_app(app)
 
 register_routes(app)
 start_auto_submit_job()
