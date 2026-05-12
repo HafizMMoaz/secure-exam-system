@@ -2,7 +2,7 @@ import requests
 from bson import ObjectId
 from pymongo.errors import PyMongoError
 
-from config.config import behavioral_events_col, exams_col, BASE_URL, now
+from config.config import behavioral_events_col, clipboard_events_col, exams_col, BASE_URL, now
 from enums.module_name import ModuleName
 from enums.log_level import LogLevel
 from enums.risk_metric import RiskMetric
@@ -138,7 +138,23 @@ def analyze_student_behavior(user_context, requested_user_id, exam_id):
         for e in db_events
     ]
 
-    result = analyze_behavior(events, exam_duration_seconds)
+    # Pull clipboard paste timestamps for the §24 bonus clipboard-burst rule.
+    paste_seconds = []
+    try:
+        clip_cursor = clipboard_events_col.find(
+            {"exam_id": exam_id, "user_id": student_id, "event_type": "paste"}
+        ).sort("server_timestamp", 1)
+        clip_docs = list(clip_cursor)
+        if clip_docs:
+            base = clip_docs[0].get("server_timestamp")
+            for doc in clip_docs:
+                ts = doc.get("server_timestamp")
+                if base and ts:
+                    paste_seconds.append((ts - base).total_seconds())
+    except PyMongoError:
+        paste_seconds = []
+
+    result = analyze_behavior(events, exam_duration_seconds, paste_seconds)
 
     summary_doc = {
         "exam_id": exam_id,

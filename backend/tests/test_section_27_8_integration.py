@@ -240,18 +240,18 @@ def test_sse_stream_emits_stream_open_event(base_url, db, teacher_token, seeded_
 
 
 # 8. Module 9 input validation integration (Phase 5.5)
-def test_nosql_injection_in_login_returns_400(base_url):
+def test_nosql_injection_in_otp_request_returns_400(base_url):
     """
-    Login body containing a Mongo operator string must be rejected by
-    the @validate_body wrapper. Without Module 9, this string would be
-    passed verbatim into a pymongo find_one.
+    OTP request body with a nested Mongo operator key must be rejected
+    by the @validate_body wrapper. Target the OTP endpoint instead of
+    /login so the test isn't shadowed by the rate-limit test in the
+    same minute (separate bucket).
     """
     r = requests.post(
-        f"{base_url}/api/auth/login",
+        f"{base_url}/api/auth/otp/request",
         json={"username": {"$ne": None}, "password": "x"},
         timeout=5,
     )
-    # The validator rejects nested operators as a NoSQL-style payload.
     assert r.status_code == 400, f"got {r.status_code}: {r.text[:200]}"
 
 

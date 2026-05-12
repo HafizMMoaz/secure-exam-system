@@ -112,6 +112,7 @@ export default function Dashboard() {
   const [students, setStudents] = useState<StudentUser[]>([])
   const [liveEvents, setLiveEvents] = useState<Array<{ kind: string; user_id?: string; timestamp?: string }>>([])
   const [liveConnected, setLiveConnected] = useState(false)
+  const [riskSort, setRiskSort] = useState<{ key: "score" | "risk_level" | "username"; dir: "asc" | "desc" }>({ key: "score", dir: "desc" })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
@@ -1314,30 +1315,70 @@ export default function Dashboard() {
               {loading ? <span className="spinner" aria-label="Loading" /> : "Load Risk Scores"}
             </button>
 
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Student</th>
-                    <th>Score</th>
-                    <th>Risk Level</th>
-                    <th>Tab Switches</th>
-                    <th>Fast Answers</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {riskData.map((row) => (
-                    <tr key={`${row.student_id}-${row.computed_at}`}>
-                      <td>{row.username}</td>
-                      <td>{row.score}</td>
-                      <td><span className={`badge ${getStateBadgeClass(row.risk_level)}`}>{row.risk_level}</span></td>
-                      <td>{row.metrics.tab_switch_count ?? row.metrics.tab_switches ?? 0}</td>
-                      <td>{row.metrics.fast_answer_count ?? row.metrics.fast_answers ?? 0}</td>
+            {riskData.length === 0 ? (
+              <p className="muted">
+                {examId
+                  ? "No risk scores yet — click \"Load Risk Scores\" once the exam is SUBMITTED."
+                  : "Pick an exam first."}
+              </p>
+            ) : (
+              <div className="table-wrap">
+                <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 8 }}>
+                  <span className="badge badge-red">HIGH {riskData.filter((r) => r.risk_level === "HIGH").length}</span>
+                  <span className="badge badge-orange">MEDIUM {riskData.filter((r) => r.risk_level === "MEDIUM").length}</span>
+                  <span className="badge badge-green">LOW {riskData.filter((r) => r.risk_level === "LOW").length}</span>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      {[
+                        { key: "username", label: "Student" },
+                        { key: "score", label: "Score" },
+                        { key: "risk_level", label: "Risk Level" },
+                      ].map((col) => (
+                        <th
+                          key={col.key}
+                          style={{ cursor: "pointer", userSelect: "none" }}
+                          onClick={() => setRiskSort((cur) => ({
+                            key: col.key as "score" | "risk_level" | "username",
+                            dir: cur.key === col.key && cur.dir === "desc" ? "asc" : "desc",
+                          }))}
+                        >
+                          {col.label}{riskSort.key === col.key ? (riskSort.dir === "desc" ? " ▼" : " ▲") : ""}
+                        </th>
+                      ))}
+                      <th>Tab Switches</th>
+                      <th>Fast Answers</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {[...riskData]
+                      .sort((a, b) => {
+                        const mul = riskSort.dir === "desc" ? -1 : 1
+                        if (riskSort.key === "risk_level") {
+                          const order: Record<string, number> = { LOW: 0, MEDIUM: 1, HIGH: 2 }
+                          return mul * ((order[a.risk_level] ?? 0) - (order[b.risk_level] ?? 0))
+                        }
+                        if (riskSort.key === "score") return mul * (a.score - b.score)
+                        return mul * a.username.localeCompare(b.username)
+                      })
+                      .map((row) => (
+                        <tr key={`${row.student_id}-${row.computed_at}`}>
+                          <td>{row.username}</td>
+                          <td>{row.score}</td>
+                          <td><span className={`badge ${getStateBadgeClass(row.risk_level)}`}>{row.risk_level}</span></td>
+                          <td>{row.metrics.tab_switch_count ?? row.metrics.tab_switches ?? 0}</td>
+                          <td>{row.metrics.fast_answer_count ?? row.metrics.fast_answers ?? 0}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {liveConnected && liveEvents.length === 0 ? (
+              <p className="muted">Live stream open — waiting for events from any enrolled student.</p>
+            ) : null}
 
             {liveEvents.length > 0 ? (
               <div className="table-wrap">
