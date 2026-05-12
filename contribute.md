@@ -12,9 +12,11 @@ cd secure-exam-system
 2) Create and activate a Python virtual environment and install dependencies
 
 ```powershell
+cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate
 pip install -r requirements.txt
+pip install -r requirements-test.txt   # for running the PRD §27.8 tests
 ```
 
 3) Configure environment and start required services
@@ -54,10 +56,13 @@ git checkout -b feature/your-descriptive-name
 5) Make changes and run tests locally before committing or pushing
 
 - Edit code in `backend/modules/...` or other files.
-- Run unit tests and verification checks before you push:
+- Run the PRD §27.8 integration test suite before you push. It expects a
+  running backend on `BASE_URL` (default `http://127.0.0.1:5500`) and the
+  same MongoDB the backend uses.
 
 ```powershell
-pytest
+cd backend
+python -m pytest tests/ -v
 ```
 
 - If you changed the frontend, also run:

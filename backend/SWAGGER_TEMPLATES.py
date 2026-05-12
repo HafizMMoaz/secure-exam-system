@@ -4,7 +4,7 @@ SWAGGER DOCSTRING REFERENCE
 Copy-paste these templates into your route functions.
 Flasgger reads the YAML inside the docstring automatically.
 
-Docs live at: http://localhost:5000/api/docs
+Docs live at: http://localhost:5500/api/docs
 """
 
 

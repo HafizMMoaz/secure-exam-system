@@ -11,7 +11,7 @@ from jobs import start_auto_submit_job
 app = Flask(__name__)
 CORS(app, origins=[FRONTEND_URL], supports_credentials=True)
 
-# ── Swagger docs at http://localhost:5000/api/docs ────────────────────────────
+# ── Swagger docs at http://localhost:5500/api/docs ────────────────────────────
 init_swagger(app)
 
 # ── Register global error handlers ────────────────────────────────────────────

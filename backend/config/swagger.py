@@ -9,7 +9,7 @@ Usage in app.py:
     init_swagger(app)
 
 Then access docs at:
-    http://localhost:5000/api/docs
+    http://localhost:5500/api/docs
 """
 
 from flasgger import Swagger
