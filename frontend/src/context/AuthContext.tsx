@@ -1,25 +1,23 @@
-import { createContext, useEffect, useState, type ReactNode } from "react"
-import type { ApiResponse, AuthContextType, User } from "../types"
+import { useState, type ReactNode } from "react"
+import type { ApiResponse, User } from "../types"
 import client from "../api/client"
+import { AuthContext } from "./AuthContextValue"
 
-export const AuthContext = createContext<AuthContextType | null>(null)
+function readStoredUser(): User | null {
+  const savedUser = localStorage.getItem("user")
+  if (!savedUser) return null
+
+  try {
+    return JSON.parse(savedUser) as User
+  } catch {
+    return null
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
-  const [token, setToken] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    const savedToken = localStorage.getItem("token")
-    const savedUser = localStorage.getItem("user")
-
-    if (savedToken && savedUser) {
-      setToken(savedToken)
-      setUser(JSON.parse(savedUser) as User)
-    }
-
-    setLoading(false)
-  }, [])
+  const [user, setUser] = useState<User | null>(() => readStoredUser())
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem("token"))
+  const [loading] = useState(false)
 
   const login = async (username: string, password: string): Promise<User> => {
     const response = await client.post<ApiResponse<{ token: string; role: User["role"]; username: string }>>(

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useEffect } from "react"
 import client from "../api/client"
 
 interface MonitoringOptions {
@@ -7,16 +7,13 @@ interface MonitoringOptions {
 }
 
 export function useExamMonitoring({ examId, active }: MonitoringOptions) {
-  const examIdRef = useRef(examId)
-  examIdRef.current = examId
-
   useEffect(() => {
     if (!active || !examId) return
 
     const handleVisibilityChange = () => {
       const eventType = document.hidden ? "hidden" : "visible"
       client.post("/api/tab/event", {
-        exam_id: examIdRef.current,
+        exam_id: examId,
         event_type: eventType,
         timestamp: new Date().toISOString(),
       }).catch(() => {})
@@ -24,7 +21,7 @@ export function useExamMonitoring({ examId, active }: MonitoringOptions) {
 
     const handleBlur = () => {
       client.post("/api/tab/event", {
-        exam_id: examIdRef.current,
+        exam_id: examId,
         event_type: "blur",
         timestamp: new Date().toISOString(),
       }).catch(() => {})
@@ -32,7 +29,7 @@ export function useExamMonitoring({ examId, active }: MonitoringOptions) {
 
     const handleFocus = () => {
       client.post("/api/tab/event", {
-        exam_id: examIdRef.current,
+        exam_id: examId,
         event_type: "focus",
         timestamp: new Date().toISOString(),
       }).catch(() => {})
@@ -40,7 +37,7 @@ export function useExamMonitoring({ examId, active }: MonitoringOptions) {
 
     const handleCopy = () => {
       client.post("/api/clipboard/event", {
-        exam_id: examIdRef.current,
+        exam_id: examId,
         event_type: "copy",
         content_length: window.getSelection()?.toString().length || 0,
         timestamp: new Date().toISOString(),
@@ -50,7 +47,7 @@ export function useExamMonitoring({ examId, active }: MonitoringOptions) {
     const handlePaste = (event: ClipboardEvent) => {
       const text = event.clipboardData?.getData("text") || ""
       client.post("/api/clipboard/event", {
-        exam_id: examIdRef.current,
+        exam_id: examId,
         event_type: "paste",
         content_length: text.length,
         timestamp: new Date().toISOString(),
@@ -59,7 +56,7 @@ export function useExamMonitoring({ examId, active }: MonitoringOptions) {
 
     const handleCut = () => {
       client.post("/api/clipboard/event", {
-        exam_id: examIdRef.current,
+        exam_id: examId,
         event_type: "cut",
         content_length: window.getSelection()?.toString().length || 0,
         timestamp: new Date().toISOString(),
@@ -75,7 +72,7 @@ export function useExamMonitoring({ examId, active }: MonitoringOptions) {
 
     const heartbeat = window.setInterval(() => {
       client.post("/api/activity/heartbeat", {
-        exam_id: examIdRef.current,
+        exam_id: examId,
         timestamp: new Date().toISOString(),
       }).catch(() => {})
     }, 30000)

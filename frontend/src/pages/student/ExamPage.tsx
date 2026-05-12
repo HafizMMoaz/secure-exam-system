@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react"
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import axios from "axios"
 import { useNavigate } from "react-router-dom"
 import client from "../../api/client"
@@ -134,6 +134,11 @@ export default function ExamPage() {
   const [resumeMessage, setResumeMessage] = useState("")
 
   const autoSubmitRef = useRef(false)
+  const currentTimeRef = useRef(currentTime)
+
+  useEffect(() => {
+    currentTimeRef.current = currentTime
+  }, [currentTime])
 
   const currentQuestion = questions[currentIndex]
   const timerColor = remainingSeconds < 60 ? "red" : remainingSeconds <= 300 ? "orange" : "green"
@@ -167,7 +172,7 @@ export default function ExamPage() {
     currentTime >= new Date(examStartTime).getTime() &&
     currentTime <= new Date(examEndTime).getTime()
 
-  const handleSubmitExam = async () => {
+  const handleSubmitExam = useCallback(async () => {
     if (autoSubmitRef.current) return
     autoSubmitRef.current = true
     setLoading(true)
@@ -186,15 +191,15 @@ export default function ExamPage() {
 
     setStep("SUBMITTED")
     setLoading(false)
-  }
+  }, [examId])
 
   const handleSelectAnswer = async (answer: string) => {
     if (!currentQuestion) return
 
     const qId = currentQuestion.question_id
     const previousAnswer = answers[qId]
-    const startAt = questionStartTimes[qId] || Date.now()
-    const timeTaken = (Date.now() - startAt) / 1000
+    const startAt = questionStartTimes[qId] || currentTime
+    const timeTaken = Math.max(0, (currentTime - startAt) / 1000)
 
     setAnswers((prev) => ({ ...prev, [qId]: answer }))
     setSavingAnswer(true)
@@ -211,7 +216,7 @@ export default function ExamPage() {
         exam_id: examId,
         question_id: qId,
         answer_time_seconds: timeTaken,
-        submission_time_seconds: (Date.now() - examTimerStartTime) / 1000,
+        submission_time_seconds: Math.max(0, (currentTime - examTimerStartTime) / 1000),
         edit_count: previousAnswer ? 1 : 0,
         answer,
       }).catch(() => {})
@@ -238,7 +243,7 @@ export default function ExamPage() {
       const nextQ = questions[currentIndex + 1]
       setCurrentIndex(currentIndex + 1)
       if (nextQ && !questionStartTimes[nextQ.question_id]) {
-        setQuestionStartTimes((prev) => ({ ...prev, [nextQ.question_id]: Date.now() }))
+        setQuestionStartTimes((prev) => ({ ...prev, [nextQ.question_id]: currentTime }))
       }
     }
   }
@@ -258,7 +263,7 @@ export default function ExamPage() {
       if (!String(answers[question.question_id] || "").trim()) {
         setCurrentIndex(idx)
         if (!questionStartTimes[question.question_id]) {
-          setQuestionStartTimes((prev) => ({ ...prev, [question.question_id]: Date.now() }))
+            setQuestionStartTimes((prev) => ({ ...prev, [question.question_id]: currentTime }))
         }
         return
       }
@@ -380,7 +385,7 @@ export default function ExamPage() {
         if (cancelled) return
 
         setRemainingSeconds(timerResponse.data.data.remaining_seconds ?? 0)
-        setExamTimerStartTime(Date.now())
+        setExamTimerStartTime(currentTimeRef.current)
 
         const questionsResponse = await client.get<AllQuestionsResponse>(`/api/questions/exam/${examId}/all`)
         if (cancelled) return
@@ -399,7 +404,7 @@ export default function ExamPage() {
         setCurrentIndex(0)
 
         if (allQuestions.length > 0) {
-          setQuestionStartTimes({ [allQuestions[0].question_id]: Date.now() })
+          setQuestionStartTimes({ [allQuestions[0].question_id]: currentTimeRef.current })
         } else {
           setQuestionStartTimes({})
         }
@@ -462,7 +467,7 @@ export default function ExamPage() {
       autoSubmitRef.current = true
       void handleSubmitExam()
     }
-  }, [remainingSeconds, step])
+  }, [remainingSeconds, step, handleSubmitExam])
 
   useEffect(() => {
     const qId = currentQuestion?.question_id
@@ -472,8 +477,9 @@ export default function ExamPage() {
     if (!answer) return
 
     const timer = window.setTimeout(async () => {
-      const startAt = questionStartTimes[qId] || Date.now()
-      const timeTaken = (Date.now() - startAt) / 1000
+      const now = currentTimeRef.current
+      const startAt = questionStartTimes[qId] || now
+      const timeTaken = Math.max(0, (now - startAt) / 1000)
 
       try {
         await client.post("/api/questions/answer/save", {
@@ -513,7 +519,7 @@ export default function ExamPage() {
       setStudentsCount(exam.students_count)
       setTotalMarks(exam.total_marks || 0)
 
-      if (new Date(exam.start_time).getTime() > Date.now()) {
+      if (new Date(exam.start_time).getTime() > currentTime) {
         setError(`Exam starts at ${formatLocalDateTime(exam.start_time)}. Please come back then.`)
       }
     } catch (selectionError) {
@@ -859,7 +865,7 @@ export default function ExamPage() {
                     setCurrentIndex(i)
                     setShowMap(false)
                     if (!questionStartTimes[q.question_id]) {
-                      setQuestionStartTimes((prev) => ({ ...prev, [q.question_id]: Date.now() }))
+                      setQuestionStartTimes((prev) => ({ ...prev, [q.question_id]: currentTime }))
                     }
                   }}
                   style={{
