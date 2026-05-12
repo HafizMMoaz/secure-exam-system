@@ -155,6 +155,140 @@ def get_exam_state(exam_id):
     }
 
 
+def set_exam_state(user_context, exam_id, payload):
+    """
+    PRD §27.6 strict path: Module 1 is the sole writer of exams_col.state.
+    Every other module performs state transitions by POSTing here. Module 1
+    validates that the requested transition is allowed by the §27.4 state
+    machine (immediate-next-step rule, except idempotent same-state writes
+    which are accepted but no-op).
+    """
+    from enums.exam_state import ExamState
+
+    target = (payload or {}).get("to")
+    if not target:
+        raise BadRequestException("Field 'to' is required")
+
+    try:
+        target_enum = ExamState(target)
+    except ValueError:
+        raise BadRequestException(f"Unknown target state: {target}")
+
+    try:
+        exam = exams_col.find_one({"_id": ObjectId(exam_id)})
+    except (InvalidId, TypeError):
+        raise ExamNotFoundException()
+    except PyMongoError as exc:
+        raise DatabaseException(str(exc))
+
+    if not exam:
+        raise ExamNotFoundException()
+
+    current_value = exam.get("state")
+    if current_value == target:
+        return {"exam_id": str(exam["_id"]),
+                "previous_state": current_value,
+                "state": current_value,
+                "transitioned": False}
+
+    try:
+        current_enum = ExamState(current_value)
+    except (ValueError, TypeError):
+        raise BadRequestException(f"Exam is in an unrecognized state: {current_value}")
+
+    if not current_enum.can_transition_to(target_enum):
+        from exceptions import ExamStateException
+        raise ExamStateException(
+            current_state=current_value,
+            required_state=f"a state preceding {target}",
+        )
+
+    try:
+        exams_col.update_one(
+            {"_id": exam["_id"]},
+            {"$set": {"state": target}},
+        )
+    except PyMongoError as exc:
+        raise DatabaseException(str(exc))
+
+    actor_module = (payload or {}).get("actor_module") or "unknown"
+    _send_state_log(
+        user_context,
+        str(exam["_id"]),
+        current_value,
+        target,
+        actor_module,
+    )
+
+    return {
+        "exam_id": str(exam["_id"]),
+        "previous_state": current_value,
+        "state": target,
+        "transitioned": True,
+    }
+
+
+def _send_state_log(user_context, exam_id, prev, target, actor_module):
+    payload = {
+        "module": ModuleName.AUTH.value,
+        "level": LogLevel.INFO.value,
+        "user_id": (user_context or {}).get("user_id") or "",
+        "exam_id": exam_id,
+        "action": "exam_state_transition",
+        "details": {"from": prev, "to": target, "actor_module": actor_module},
+        "timestamp": now().replace(microsecond=0).isoformat() + "Z",
+    }
+    try:
+        requests.post(f"{BASE_URL}/api/logs/write", json=payload, timeout=2)
+    except Exception:
+        pass
+
+
+def set_user_active(actor_context, user_id, payload):
+    """
+    PRD §27.6 strict path: Module 1 is the sole writer of users_col fields,
+    including is_active. Module 5 (RBAC) is the policy authority — it
+    decides who gets toggled — and calls this endpoint to actually mutate.
+    """
+    if (actor_context or {}).get("role") != "teacher":
+        from exceptions import ForbiddenException
+        raise ForbiddenException("Only teachers can change account status")
+
+    if "is_active" not in (payload or {}):
+        raise BadRequestException("Field 'is_active' is required")
+
+    new_value = bool(payload["is_active"])
+
+    try:
+        result = users_col.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": {"is_active": new_value}},
+        )
+    except (InvalidId, TypeError):
+        raise UserNotFoundException()
+    except PyMongoError as exc:
+        raise DatabaseException(str(exc))
+
+    if result.matched_count == 0:
+        raise UserNotFoundException()
+
+    payload_log = {
+        "module": ModuleName.AUTH.value,
+        "level": LogLevel.SECURITY.value,
+        "user_id": (actor_context or {}).get("user_id") or "",
+        "exam_id": "",
+        "action": "user_active_toggled",
+        "details": {"target_user_id": user_id, "is_active": new_value},
+        "timestamp": now().replace(microsecond=0).isoformat() + "Z",
+    }
+    try:
+        requests.post(f"{BASE_URL}/api/logs/write", json=payload_log, timeout=2)
+    except Exception:
+        pass
+
+    return {"user_id": user_id, "is_active": new_value}
+
+
 def _issue_token(user):
     token_payload = {
         "user_id": str(user["_id"]),

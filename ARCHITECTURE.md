@@ -27,20 +27,16 @@ The PRD §27.6 table grants write access to whole collections. In practice, mult
 
 | Field(s)              | Writer       | Rationale |
 |---|---|---|
-| Document creation, `password_hash`, `is_active`, identity fields | **Module 1 (Auth)** | Owns account lifecycle and credential storage. Strict §27.6 alignment. |
-| `is_active`           | **Module 5 (RBAC)** | RBAC owns user activation/deactivation as an access-control action — disabling an account is the canonical RBAC verb. A strict §27.6 reading would route this through Module 1, but that flattens RBAC's domain into Auth and gives RBAC no actual write authority over the access surface it secures. No other module writes `is_active`. |
+| **All `users_col` writes** including `password_hash`, identity fields, and `is_active` | **Module 1 (Auth)** | Strict §27.6 alignment — Module 1 is the sole writer of `users_col`. Module 5 (RBAC) is the *policy authority* for `is_active` (decides who toggles whom) but routes the write through `PUT /api/auth/users/<id>/active` so Module 1 stays the sole writer. See `middleware/state_client.py`-style HTTP routing in `modules/rbac/service.py`. |
 
 ### `exams` collection
 
 | Field(s)              | Writer       | Rationale |
 |---|---|---|
-| Document creation, `title`, `duration_minutes`, `total_questions`, `total_marks`, `max_students`, enrollment list, teacher approval | **Module 6 (Questions)** | Module 6 is named "Secure Question Delivery" but in practice it owns the entire exam-content lifecycle (an exam is the container for its questions). Strict §27.6 routes exam document writes through Module 1 or 4; we keep them in Module 6 because (a) the exam doc is exam-content, not auth/activation state, and (b) splitting the write would require Module 6 to call back into Module 1 for every CRUD operation, which adds latency and contract surface for no security benefit. |
-| `state: DEVICE_VERIFIED` | **Module 3 (Device)** *(designed; currently no writer)* | Designed to be set when the student registers a device fingerprint. Current flow skips this intermediate state and approval happens directly from NOT_STARTED. Tracked as a known gap. |
-| `state: TEACHER_APPROVED` | **Module 6 (Questions)** | Approval is "content is ready" + "teacher signs off" — both belong with the module that holds exam content. Cannot transition until at least one question exists. |
-| `state: ACTIVATION_VALID` | **Module 4 (Activation)** | Strict §27.6 alignment — Module 4 is the activation authority. |
-| `state: IN_PROGRESS`  | **Module 8 (Timer)** | Timer.start_exam transitions the state when the student begins the timer. The timer is the security event that opens the IN_PROGRESS window. |
-| `state: SUBMITTED`    | **Module 8 (Timer)** | The §27.4 state machine names Timer as the source of submission — auto-submit on time expiry is the timer's security purpose. Strict §27.6 would route this through Module 1; we keep it in Timer because the timer is the security event that *causes* the transition. |
-| `state: ANALYZING`, `state: COMPLETED` | **Module 17 (Risk)** | Module 17 owns the post-submit analysis lifecycle. The ANALYZING-on-compute and COMPLETED-on-finish transitions are the entire externally-observable behavior of the analysis stage. |
+| **All `exams_col.state` writes** | **Module 1 (Auth)** | Strict §27.6 alignment — Module 1 is the sole writer of the state field. Every other module performs state transitions by `PUT /api/auth/exam/state/<exam_id>` and Module 1 validates the transition against the §27.4 state machine (`ExamState.can_transition_to`). See `middleware/state_client.py`. |
+| Exam content fields (`title`, `duration_minutes`, `total_questions`, `total_marks`, `max_students`, enrollment list, etc.) | **Module 6 (Questions)** | Module 6 is "Secure Question Delivery" and owns the exam-content lifecycle. The §27.6 table grants `exams_col` writes to Modules 1 and 4; we read the table as governing the *state field* (which the §27.4 machine governs centrally) and we treat content fields as out of scope for that contract. State transitions go through Module 1; content stays here. |
+| State transition actors (who calls `PUT /api/auth/exam/state/<id>`) | Module 3 (Device) → DEVICE_VERIFIED (via Module 6 approve traversal); Module 6 (Questions) → DEVICE_VERIFIED, TEACHER_APPROVED; Module 4 (Activation) → ACTIVATION_VALID; Module 8 (Timer) → IN_PROGRESS, SUBMITTED; Module 17 (Risk) → ANALYZING, COMPLETED | Each module triggers the transition whose security event it owns. The actual write is performed by Module 1; the §27.4 sequence is enforced server-side. |
+| `auto_submit` background job — system-process state writes | **Documented §27.6 exemption** | `jobs/auto_submit.py` runs without a user JWT, so it cannot authenticate to the central state endpoint. It writes `SUBMITTED` directly with an inline `# §27.6 (strict) exemption` note. This is the single sanctioned bypass. |
 
 ### `responses` collection
 
@@ -79,7 +75,7 @@ Not enumerated in §27.6. Each is owned by its eponymous module (Module 10, 11, 
 
 ## Read access
 
-The PRD §27.6 table also specifies reader sets. We adopt the same refinement:
+The PRD §27.6 table also specifies reader sets. Writes are now strictly aligned (Tier 1 work, this branch). Reads remain at the hybrid baseline for performance and are explicitly documented:
 
 - **Module 17 (Risk)** reads `users` directly for username resolution in the dashboard. Strict §27.6 lists only Modules 1 and 5 as `users` readers; we deviate so the dashboard does not require an additional `GET /api/auth/profile/<id>` HTTP call per row at render time. The read is read-only; no §27.6 *write* invariant is violated.
 - **Module 17** reads `exams` to check state before computing risk. Strict §27.6 lists Modules 1, 4, 5, 6, 7, 8; we add 17 because every state-machine consumer must read the state machine. This is the §27.4 enforcement contract, not a §27.6 violation.

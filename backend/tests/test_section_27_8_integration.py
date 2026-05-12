@@ -215,6 +215,72 @@ def test_otp_wrong_code_rejected(base_url, db):
     assert r.status_code == 401, r.text
 
 
+# 10. WebSocket monitoring channel (Phase 4 / §24 bonus — true WebSockets)
+def test_websocket_monitoring_round_trip(base_url, db):
+    """
+    Connect a python-socketio client to /monitoring, subscribe to an
+    exam room, then write a tab_events row by hitting the HTTP endpoint
+    and verify the client receives a 'tab_event' over the WS.
+    """
+    import socketio as sio_lib
+    import bcrypt
+    from bson import ObjectId
+
+    sio = sio_lib.Client(reconnection=False)
+    received: list[dict] = []
+    subscribed = {"ok": False}
+
+    @sio.on("subscribed", namespace="/monitoring")
+    def _on_sub(_data):
+        subscribed["ok"] = True
+
+    @sio.on("tab_event", namespace="/monitoring")
+    def _on_tab(data):
+        received.append(data)
+
+    sio.connect(base_url, namespaces=["/monitoring"],
+                transports=["polling", "websocket"], wait_timeout=5)
+    # Emit subscribe only after connect() returns — namespace is ready now.
+    sio.emit("subscribe", {"exam_id": "ws_demo_exam"}, namespace="/monitoring")
+
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline and not subscribed["ok"]:
+        sio.sleep(0.1)
+    assert subscribed["ok"], "client never received subscribed ack"
+
+    # Seed a student and mint a JWT so we can call the tab event endpoint.
+    student_id = ObjectId()
+    db.users.insert_one({
+        "_id": student_id,
+        "username": "ws_student",
+        "password_hash": bcrypt.hashpw(b"x", bcrypt.gensalt()).decode(),
+        "role": "student",
+        "is_active": True,
+    })
+    import jwt as _jwt
+    token = _jwt.encode({
+        "user_id": str(student_id), "username": "ws_student", "role": "student",
+        "session_id": "ws_sess", "device_fingerprint_hash": "fp",
+        "exp": int(time.time()) + 600,
+    }, "test_secret_for_smoke_only_do_not_use_in_prod", algorithm="HS256")
+
+    r = requests.post(
+        f"{base_url}/api/tab/event",
+        json={"exam_id": "ws_demo_exam", "event_type": "blur",
+              "timestamp": datetime.now(timezone.utc).isoformat()},
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=5,
+    )
+    assert r.status_code == 200, r.text
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and not received:
+        sio.sleep(0.1)
+    sio.disconnect()
+    assert received, "no WS event arrived"
+    assert received[0].get("exam_id") == "ws_demo_exam"
+
+
 # 9. SSE live-monitoring stream (Phase 4 / §24 bonus)
 def test_sse_stream_emits_stream_open_event(base_url, db, teacher_token, seeded_exam):
     """
@@ -240,16 +306,17 @@ def test_sse_stream_emits_stream_open_event(base_url, db, teacher_token, seeded_
 
 
 # 8. Module 9 input validation integration (Phase 5.5)
-def test_nosql_injection_in_otp_request_returns_400(base_url):
+def test_nosql_injection_via_register_returns_400(base_url):
     """
-    OTP request body with a nested Mongo operator key must be rejected
-    by the @validate_body wrapper. Target the OTP endpoint instead of
-    /login so the test isn't shadowed by the rate-limit test in the
-    same minute (separate bucket).
+    Register body with a nested Mongo operator key must be rejected by
+    the @validate_body wrapper. Target /register because it's
+    @validate_body-wrapped without a rate-limit decorator, so the test
+    doesn't share a limiter bucket with other auth tests in the same
+    minute.
     """
     r = requests.post(
-        f"{base_url}/api/auth/otp/request",
-        json={"username": {"$ne": None}, "password": "x"},
+        f"{base_url}/api/auth/register",
+        json={"username": {"$ne": None}, "password": "x", "role": "student"},
         timeout=5,
     )
     assert r.status_code == 400, f"got {r.status_code}: {r.text[:200]}"

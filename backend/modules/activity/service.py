@@ -81,6 +81,14 @@ def record_heartbeat(user_context, payload):
     except PyMongoError as exc:
         raise DatabaseException(str(exc))
 
+    # §24 bonus: push to WebSocket subscribers of this exam's room.
+    from middleware.socketio_app import emit_monitoring_event
+    emit_monitoring_event(exam_id, "activity_event", {
+        "user_id": user_id, "exam_id": exam_id,
+        "event_type": "heartbeat", "idle_seconds": int(idle_seconds),
+        "is_idle": is_idle, "timestamp": now().isoformat(),
+    })
+
     if is_idle:
         _send_log(LogLevel.WARNING.value, user_id, "idle_period_detected", {"exam_id": exam_id, "idle_seconds": int(idle_seconds)})
 

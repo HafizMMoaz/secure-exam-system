@@ -130,7 +130,7 @@ def list_users(role=None):
         raise DatabaseException(str(exc))
 
 
-def toggle_user_status(user_id, actor_user_id=None):
+def toggle_user_status(user_id, actor_user_id=None, auth_header=""):
     try:
         user = users_col.find_one({"_id": ObjectId(user_id)})
     except (InvalidId, TypeError):
@@ -143,14 +143,24 @@ def toggle_user_status(user_id, actor_user_id=None):
 
     new_value = not bool(user.get("is_active", False))
 
-    # §27.6 (refined): Module 5 owns `is_active` — see ARCHITECTURE.md.
+    # §27.6 (strict): users_col is owned by Module 1. RBAC is the policy
+    # authority (decides who toggles whom) but routes the write through
+    # the central /api/auth/users/<id>/active endpoint so Module 1 stays
+    # the sole writer.
     try:
-        users_col.update_one(
-            {"_id": user.get("_id")},
-            {"$set": {"is_active": new_value}},
+        response = requests.put(
+            f"{BASE_URL}/api/auth/users/{user_id}/active",
+            json={"is_active": new_value},
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=5,
         )
-    except PyMongoError as exc:
-        raise DatabaseException(str(exc))
+    except requests.RequestException as exc:
+        raise DatabaseException(f"Auth endpoint unreachable: {exc}")
+
+    if response.status_code != 200:
+        raise DatabaseException(
+            f"Auth endpoint returned {response.status_code}: {response.text[:200]}"
+        )
 
     _send_log(
         LogLevel.INFO.value,

@@ -9,6 +9,8 @@ from modules.auth.service import (
     login_user,
     register_user,
     request_otp,
+    set_exam_state,
+    set_user_active,
     verify_otp,
 )
 
@@ -46,6 +48,20 @@ def profile():
 def exam_state(exam_id):
     data = get_exam_state(exam_id)
     return success_response(data=data, message="")
+
+
+def exam_state_transition(exam_id):
+    user_context = getattr(request, "user", {})
+    payload = request.get_json(silent=True) or {}
+    data = set_exam_state(user_context, exam_id, payload)
+    return success_response(data=data, message="State transitioned")
+
+
+def user_active_toggle(user_id):
+    actor_context = getattr(request, "user", {})
+    payload = request.get_json(silent=True) or {}
+    data = set_user_active(actor_context, user_id, payload)
+    return success_response(data=data, message="User active flag updated")
 
 
 def health():

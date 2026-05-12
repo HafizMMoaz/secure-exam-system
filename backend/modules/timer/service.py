@@ -5,6 +5,7 @@ from pymongo.errors import PyMongoError
 from pytz import utc
 
 from config.config import exams_col, exam_sessions_col, BASE_URL, now
+from middleware.state_client import transition_exam_state
 from enums.module_name import ModuleName
 from enums.log_level import LogLevel
 from enums.exam_state import ExamState
@@ -49,7 +50,7 @@ def _send_log(level, user_id, action, details):
         pass
 
 
-def start_exam(user_context, payload):
+def start_exam(user_context, payload, auth_header=""):
     exam_id = (payload or {}).get("exam_id")
     if not exam_id:
         raise BadRequestException("exam_id is required")
@@ -110,10 +111,16 @@ def start_exam(user_context, payload):
 
     try:
         exam_sessions_col.insert_one(session_doc)
-        # §27.6 (refined): Module 8 owns `state: IN_PROGRESS` — see ARCHITECTURE.md.
-        exams_col.update_one({"_id": ObjectId(exam_id)}, {"$set": {"state": ExamState.IN_PROGRESS.value}})
     except PyMongoError as exc:
         raise DatabaseException(str(exc))
+
+    # §27.6 (strict): state transition routed through Module 1.
+    transition_exam_state(
+        exam_id,
+        ExamState.IN_PROGRESS.value,
+        auth_header,
+        ModuleName.TIMER.value,
+    )
 
     _send_log(LogLevel.INFO.value, user_id, "exam_started", {"exam_id": exam_id, "student_id": user_id, "duration_minutes": duration_minutes})
 
@@ -164,7 +171,7 @@ def status(user_context, exam_id):
     }
 
 
-def submit_exam(user_context, payload):
+def submit_exam(user_context, payload, auth_header=""):
     exam_id = (payload or {}).get("exam_id")
     if not exam_id:
         raise BadRequestException("exam_id is required")
@@ -188,10 +195,16 @@ def submit_exam(user_context, payload):
 
     try:
         exam_sessions_col.update_one({"_id": session.get("_id")}, {"$set": {"is_active": False, "submitted_at": now()}})
-        # §27.6 (refined): Module 8 owns `state: SUBMITTED` — see ARCHITECTURE.md.
-        exams_col.update_one({"_id": ObjectId(exam_id)}, {"$set": {"state": ExamState.SUBMITTED.value}})
     except PyMongoError as exc:
         raise DatabaseException(str(exc))
+
+    # §27.6 (strict): state transition routed through Module 1.
+    transition_exam_state(
+        exam_id,
+        ExamState.SUBMITTED.value,
+        auth_header,
+        ModuleName.TIMER.value,
+    )
 
     _send_log(LogLevel.INFO.value, user_id, "exam_submitted", {"exam_id": exam_id, "student_id": user_id})
 

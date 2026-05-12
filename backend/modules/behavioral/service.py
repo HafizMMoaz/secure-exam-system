@@ -71,6 +71,15 @@ def record_event(user_context, payload):
     except PyMongoError as exc:
         raise DatabaseException(str(exc))
 
+    # §24 bonus: push to WebSocket subscribers of this exam's room.
+    from middleware.socketio_app import emit_monitoring_event
+    emit_monitoring_event(exam_id, "behavioral_event", {
+        "user_id": user_id, "exam_id": exam_id,
+        "question_id": question_id,
+        "answer_time_seconds": answer_time_seconds,
+        "is_fast_answer": fast, "timestamp": now().isoformat(),
+    })
+
     if fast:
         _send_log(
             LogLevel.SECURITY.value,

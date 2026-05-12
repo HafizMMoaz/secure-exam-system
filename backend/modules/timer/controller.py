@@ -12,7 +12,8 @@ from modules.timer.service import (
 def start():
     user_context = getattr(request, "user", {})
     payload = request.get_json(silent=True) or {}
-    data = start_exam(user_context, payload)
+    auth_header = request.headers.get("Authorization", "")
+    data = start_exam(user_context, payload, auth_header)
     return success_response(data=data)
 
 
@@ -26,7 +27,8 @@ def stat():
 def submit():
     user_context = getattr(request, "user", {})
     payload = request.get_json(silent=True) or {}
-    data = submit_exam(user_context, payload)
+    auth_header = request.headers.get("Authorization", "")
+    data = submit_exam(user_context, payload, auth_header)
     return success_response(data=data)
 
 

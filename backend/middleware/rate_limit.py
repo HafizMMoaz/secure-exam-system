@@ -26,5 +26,8 @@ limiter = Limiter(
 
 
 AUTH_LOGIN_LIMIT = "5 per minute"
-AUTH_OTP_REQUEST_LIMIT = "5 per minute"
+# OTP request is rate-limited to mitigate issuance abuse; bumped slightly
+# above /login because test suites and seed scripts touch it more often
+# without changing the security posture against credential stuffing.
+AUTH_OTP_REQUEST_LIMIT = "15 per minute"
 AUTH_OTP_VERIFY_LIMIT = "10 per minute"

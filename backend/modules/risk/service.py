@@ -3,6 +3,7 @@ from bson import ObjectId
 from pymongo.errors import PyMongoError
 
 from config.config import responses_col, behavioral_events_col, exams_col, users_col, risk_scores_col, BASE_URL, now
+from middleware.state_client import transition_exam_state
 from enums.module_name import ModuleName
 from enums.log_level import LogLevel
 from enums.risk_metric import RiskMetric
@@ -108,20 +109,13 @@ def compute_exam_risk(user_context, exam_id, auth_header):
         )
 
     # §27.4 SUBMITTED → ANALYZING transition; idempotent if already ANALYZING.
-    # §27.6 (refined): Module 17 owns `state: ANALYZING/COMPLETED` — see ARCHITECTURE.md.
+    # §27.6 (strict): routed through Module 1's central state endpoint.
     if current_state == ExamState.SUBMITTED.value:
-        try:
-            exams_col.update_one(
-                {"_id": exam.get("_id")},
-                {"$set": {"state": ExamState.ANALYZING.value}},
-            )
-        except PyMongoError as exc:
-            raise DatabaseException(str(exc))
-        _send_log(
-            LogLevel.INFO.value,
-            (user_context or {}).get("user_id"),
-            "exam_state_transition",
-            {"exam_id": exam_id, "from": ExamState.SUBMITTED.value, "to": ExamState.ANALYZING.value},
+        transition_exam_state(
+            exam_id,
+            ExamState.ANALYZING.value,
+            auth_header,
+            ModuleName.RISK.value,
         )
 
     student_ids = _get_student_ids(exam_id)
@@ -157,11 +151,13 @@ def compute_exam_risk(user_context, exam_id, auth_header):
 
         results.append({"student_id": student_id, "score": score, "risk_level": risk_level, "metrics": metrics})
 
-    try:
-        # §27.6 (refined): Module 17 owns `state: COMPLETED` — see ARCHITECTURE.md.
-        exams_col.update_one({"_id": exam.get("_id")}, {"$set": {"state": ExamState.COMPLETED.value}})
-    except PyMongoError as exc:
-        raise DatabaseException(str(exc))
+    # §27.6 (strict): routed through Module 1's central state endpoint.
+    transition_exam_state(
+        exam_id,
+        ExamState.COMPLETED.value,
+        auth_header,
+        ModuleName.RISK.value,
+    )
 
     return {
         "exam_id": exam_id,
