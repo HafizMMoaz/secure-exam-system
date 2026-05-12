@@ -62,7 +62,7 @@ def start_exam(user_context, payload):
     if not exam:
         raise ExamNotFoundException()
 
-    if exam.get("state") != ExamState.ACTIVATION_VALID.value:
+    if exam.get("state") not in {ExamState.ACTIVATION_VALID.value, ExamState.IN_PROGRESS.value}:
         raise ExamStateException(current_state=exam.get("state"), required_state=ExamState.ACTIVATION_VALID.value)
 
     current_time = now()

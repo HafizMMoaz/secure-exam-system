@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
+import { useEffect, useRef, useState, type FormEvent } from "react"
 import axios from "axios"
 import { useNavigate } from "react-router-dom"
 import client from "../../api/client"
@@ -6,12 +6,6 @@ import { useAuth } from "../../hooks/useAuth"
 import { getDeviceSignals, useDeviceFingerprint } from "../../hooks/useDeviceFingerprint"
 import { useExamMonitoring } from "../../hooks/useExamMonitoring"
 import type { ApiResponse, ExamStep, Question } from "../../types"
-
-interface NextQuestionPayload {
-  question: Question | null
-  exam_complete: boolean
-  message?: string
-}
 
 interface ExamStatePayload {
   state: string
@@ -27,29 +21,36 @@ interface PublicExamPayload {
   end_time: string
   max_students: number
   students_count: number
+  total_questions: number
+  total_marks: number
 }
 
 interface EnrollExamPayload {
   already_enrolled: boolean
   exam_id: string
-  start_time?: string
-  end_time?: string
-  duration_minutes?: number
 }
 
 interface TimerStartPayload {
   remaining_seconds: number
   resumed?: boolean
-  start_time?: string
-  end_time?: string
-  duration_minutes?: number
 }
 
-type NextQuestionResponse = ApiResponse<NextQuestionPayload>
+interface AllQuestionsPayload {
+  questions: Question[]
+  total_questions: number
+  total_marks: number
+}
+
+interface AnswersListPayload {
+  answers: Record<string, string>
+}
+
 type ExamStateResponse = ApiResponse<ExamStatePayload>
 type PublicExamResponse = ApiResponse<PublicExamPayload>
 type EnrollExamResponse = ApiResponse<EnrollExamPayload>
 type TimerStartResponse = ApiResponse<TimerStartPayload>
+type AllQuestionsResponse = ApiResponse<AllQuestionsPayload>
+type AnswersListResponse = ApiResponse<AnswersListPayload>
 
 function getErrorMessage(error: unknown) {
   if (axios.isAxiosError(error)) {
@@ -89,7 +90,7 @@ function StudentChrome({
       <header className="navbar">
         <div className="navbar-brand">SecureExam</div>
         <div className="navbar-right">
-          <span className="">{user?.username || "Unknown"}</span>
+          <span>{user?.username || "Unknown"}</span>
           <span className="badge badge-zinc">{user?.role || "student"}</span>
           <button type="button" className="btn btn-ghost" onClick={onLogout}>
             Logout
@@ -116,12 +117,15 @@ export default function ExamPage() {
   const [maxStudents, setMaxStudents] = useState(0)
   const [studentsCount, setStudentsCount] = useState(0)
   const [activationCode, setActivationCode] = useState("")
-  const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null)
-  const [selectedAnswer, setSelectedAnswer] = useState("")
-  const [questionStartTime, setQuestionStartTime] = useState<number>(0)
-  const [examTimerStartTime, setExamTimerStartTime] = useState<number>(0)
-  const [submissionTimes, setSubmissionTimes] = useState<number[]>([])
-  const [editCount, setEditCount] = useState(0)
+  const [questions, setQuestions] = useState<Question[]>([])
+  const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [currentIndex, setCurrentIndex] = useState(0)
+  const [questionStartTimes, setQuestionStartTimes] = useState<Record<string, number>>({})
+  const [showMap, setShowMap] = useState(false)
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false)
+  const [savingAnswer, setSavingAnswer] = useState(false)
+  const [totalMarks, setTotalMarks] = useState(0)
+  const [examTimerStartTime, setExamTimerStartTime] = useState(0)
   const [remainingSeconds, setRemainingSeconds] = useState(0)
   const [currentTime, setCurrentTime] = useState(() => Date.now())
   const [loading, setLoading] = useState(false)
@@ -130,7 +134,10 @@ export default function ExamPage() {
   const [resumeMessage, setResumeMessage] = useState("")
 
   const autoSubmitRef = useRef(false)
-  const questionLoadRef = useRef(false)
+
+  const currentQuestion = questions[currentIndex]
+  const timerColor = remainingSeconds < 60 ? "red" : remainingSeconds <= 300 ? "orange" : "green"
+  const answeredCount = Object.values(answers).filter((answer) => String(answer).trim().length > 0).length
 
   const formatTime = (seconds: number): string => {
     const safeSeconds = Math.max(0, Math.floor(seconds))
@@ -151,6 +158,7 @@ export default function ExamPage() {
     setExamEndTime("")
     setMaxStudents(0)
     setStudentsCount(0)
+    setTotalMarks(0)
   }
 
   const isExamJoinable =
@@ -158,6 +166,106 @@ export default function ExamPage() {
     Boolean(examEndTime) &&
     currentTime >= new Date(examStartTime).getTime() &&
     currentTime <= new Date(examEndTime).getTime()
+
+  const handleSubmitExam = async () => {
+    if (autoSubmitRef.current) return
+    autoSubmitRef.current = true
+    setLoading(true)
+
+    try {
+      await client.post("/api/timer/submit", { exam_id: examId })
+    } catch {
+      // ignore submit collisions such as already-submitted
+    }
+
+    try {
+      await client.post(`/api/behavioral/analyze?exam_id=${examId}`)
+    } catch {
+      // best effort
+    }
+
+    setStep("SUBMITTED")
+    setLoading(false)
+  }
+
+  const handleSelectAnswer = async (answer: string) => {
+    if (!currentQuestion) return
+
+    const qId = currentQuestion.question_id
+    const previousAnswer = answers[qId]
+    const startAt = questionStartTimes[qId] || Date.now()
+    const timeTaken = (Date.now() - startAt) / 1000
+
+    setAnswers((prev) => ({ ...prev, [qId]: answer }))
+    setSavingAnswer(true)
+
+    try {
+      await client.post("/api/questions/answer/save", {
+        exam_id: examId,
+        question_id: qId,
+        answer,
+        time_taken_seconds: timeTaken,
+      })
+
+      client.post("/api/behavioral/event", {
+        exam_id: examId,
+        question_id: qId,
+        answer_time_seconds: timeTaken,
+        submission_time_seconds: (Date.now() - examTimerStartTime) / 1000,
+        edit_count: previousAnswer ? 1 : 0,
+        answer,
+      }).catch(() => {})
+    } catch {
+      // silent by design
+    } finally {
+      setSavingAnswer(false)
+    }
+  }
+
+  const handleTextAnswer = (value: string) => {
+    if (!currentQuestion) return
+
+    const qId = currentQuestion.question_id
+    if (currentQuestion.word_limit > 0) {
+      const words = value.trim().split(/\s+/).filter(Boolean)
+      if (words.length > currentQuestion.word_limit) return
+    }
+    setAnswers((prev) => ({ ...prev, [qId]: value }))
+  }
+
+  const handleNext = () => {
+    if (currentIndex < questions.length - 1) {
+      const nextQ = questions[currentIndex + 1]
+      setCurrentIndex(currentIndex + 1)
+      if (nextQ && !questionStartTimes[nextQ.question_id]) {
+        setQuestionStartTimes((prev) => ({ ...prev, [nextQ.question_id]: Date.now() }))
+      }
+    }
+  }
+
+  const handlePrevious = () => {
+    if (currentIndex > 0) {
+      setCurrentIndex(currentIndex - 1)
+    }
+  }
+
+  const handleSkip = () => {
+    if (questions.length === 0) return
+
+    for (let offset = 1; offset <= questions.length; offset += 1) {
+      const idx = (currentIndex + offset) % questions.length
+      const question = questions[idx]
+      if (!String(answers[question.question_id] || "").trim()) {
+        setCurrentIndex(idx)
+        if (!questionStartTimes[question.question_id]) {
+          setQuestionStartTimes((prev) => ({ ...prev, [question.question_id]: Date.now() }))
+        }
+        return
+      }
+    }
+
+    handleNext()
+  }
 
   const handleEnroll = async () => {
     if (!examId) return
@@ -183,38 +291,6 @@ export default function ExamPage() {
       setLoading(false)
     }
   }
-
-  const handleSubmitExam = useCallback(async () => {
-    if (autoSubmitRef.current) return
-    autoSubmitRef.current = true
-    setLoading(true)
-
-    try {
-      await client.post("/api/timer/submit", { exam_id: examId })
-    } catch (submitError) {
-      const message = getErrorMessage(submitError)
-      if (!message.toLowerCase().includes("already submitted")) {
-        setError(message)
-        autoSubmitRef.current = false
-        setLoading(false)
-        return
-      }
-    }
-
-    try {
-      await client.post("/api/behavioral/analyze", undefined, {
-        params: { exam_id: examId },
-      })
-    } catch {
-      // Best effort: the exam is still marked submitted even if analysis fails here.
-    }
-
-    setStep("SUBMITTED")
-    setCurrentQuestion(null)
-    setSelectedAnswer("")
-    setResumeMessage("")
-    setLoading(false)
-  }, [examId])
 
   useExamMonitoring({ examId, active: step === "IN_PROGRESS" })
 
@@ -262,9 +338,13 @@ export default function ExamPage() {
         const response = await client.get<ExamStateResponse>(`/api/auth/exam/state/${examId}`)
         if (cancelled) return
 
-        setExamState(response.data.data.state)
-        if (response.data.data.state === "TEACHER_APPROVED") {
+        const nextState = response.data.data.state
+        setExamState(nextState)
+        if (nextState === "TEACHER_APPROVED") {
           setStep("ACTIVATION")
+        } else if (nextState === "IN_PROGRESS") {
+          setResumeMessage("Resuming your exam session...")
+          setStep("RANDOMIZATION")
         }
       } catch (waitingError) {
         if (!cancelled) {
@@ -295,11 +375,34 @@ export default function ExamPage() {
 
       try {
         await client.post("/api/randomization/generate", { exam_id: examId })
+
         const timerResponse = await client.post<TimerStartResponse>("/api/timer/start", { exam_id: examId })
         if (cancelled) return
 
         setRemainingSeconds(timerResponse.data.data.remaining_seconds ?? 0)
         setExamTimerStartTime(Date.now())
+
+        const questionsResponse = await client.get<AllQuestionsResponse>(`/api/questions/exam/${examId}/all`)
+        if (cancelled) return
+
+        const allQuestions = questionsResponse.data.data.questions || []
+        setQuestions(allQuestions)
+        setTotalMarks(questionsResponse.data.data.total_marks || 0)
+
+        const answersResponse = await client.get<AnswersListResponse>("/api/questions/answer/list", {
+          params: { exam_id: examId },
+        })
+        if (cancelled) return
+
+        const loadedAnswers = answersResponse.data.data.answers || {}
+        setAnswers(loadedAnswers)
+        setCurrentIndex(0)
+
+        if (allQuestions.length > 0) {
+          setQuestionStartTimes({ [allQuestions[0].question_id]: Date.now() })
+        } else {
+          setQuestionStartTimes({})
+        }
 
         if (timerResponse.data.data.resumed) {
           setResumeMessage("Resuming your exam...")
@@ -331,53 +434,14 @@ export default function ExamPage() {
   }, [examId, step])
 
   useEffect(() => {
-    if (step !== "IN_PROGRESS" || !examId || currentQuestion) return
-
-    let cancelled = false
-
-    const loadFirstQuestion = async () => {
-      if (questionLoadRef.current) return
-      questionLoadRef.current = true
-      setLoading(true)
-      setError("")
-
-      try {
-        const response = await client.get<NextQuestionResponse>("/api/questions/next", {
-          params: { exam_id: examId },
-        })
-
-        if (cancelled) return
-
-        if (response.data.data.exam_complete || !response.data.data.question) {
-          if (!autoSubmitRef.current) {
-            await handleSubmitExam()
-          }
-          return
-        }
-
-        setCurrentQuestion(response.data.data.question)
-        setSelectedAnswer("")
-        setEditCount(0)
-        setQuestionStartTime(Date.now())
-      } catch (questionError) {
-        if (!cancelled) {
-          setError(getErrorMessage(questionError))
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-          questionLoadRef.current = false
-        }
-      }
-    }
-
-    void loadFirstQuestion()
+    const timerId = window.setInterval(() => {
+      setCurrentTime(Date.now())
+    }, 1000)
 
     return () => {
-      cancelled = true
-      questionLoadRef.current = false
+      window.clearInterval(timerId)
     }
-  }, [currentQuestion, examId, handleSubmitExam, step])
+  }, [])
 
   useEffect(() => {
     if (step !== "IN_PROGRESS") return
@@ -392,20 +456,41 @@ export default function ExamPage() {
   }, [step])
 
   useEffect(() => {
-    const timerId = window.setInterval(() => {
-      setCurrentTime(Date.now())
+    if (step !== "IN_PROGRESS" || remainingSeconds > 0) return
+
+    if (!autoSubmitRef.current) {
+      autoSubmitRef.current = true
+      void handleSubmitExam()
+    }
+  }, [remainingSeconds, step])
+
+  useEffect(() => {
+    const qId = currentQuestion?.question_id
+    if (!qId || currentQuestion?.question_type !== "text") return
+
+    const answer = answers[qId]
+    if (!answer) return
+
+    const timer = window.setTimeout(async () => {
+      const startAt = questionStartTimes[qId] || Date.now()
+      const timeTaken = (Date.now() - startAt) / 1000
+
+      try {
+        await client.post("/api/questions/answer/save", {
+          exam_id: examId,
+          question_id: qId,
+          answer,
+          time_taken_seconds: timeTaken,
+        })
+      } catch {
+        // silent by design
+      }
     }, 1000)
 
     return () => {
-      window.clearInterval(timerId)
+      window.clearTimeout(timer)
     }
-  }, [])
-
-  useEffect(() => {
-    if (step !== "IN_PROGRESS" || remainingSeconds > 0 || autoSubmitRef.current) return
-
-    void handleSubmitExam()
-  }, [handleSubmitExam, remainingSeconds, step])
+  }, [answers, currentQuestion, examId, questionStartTimes])
 
   const handleExamSelectionSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -426,10 +511,10 @@ export default function ExamPage() {
       setExamEndTime(exam.end_time)
       setMaxStudents(exam.max_students)
       setStudentsCount(exam.students_count)
+      setTotalMarks(exam.total_marks || 0)
 
       if (new Date(exam.start_time).getTime() > Date.now()) {
         setError(`Exam starts at ${formatLocalDateTime(exam.start_time)}. Please come back then.`)
-        return
       }
     } catch (selectionError) {
       setError(getErrorMessage(selectionError))
@@ -451,63 +536,6 @@ export default function ExamPage() {
       setStep("RANDOMIZATION")
     } catch (activationError) {
       setError(getErrorMessage(activationError))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleSelectAnswer = (option: string) => {
-    setSelectedAnswer((current) => {
-      if (current !== option) {
-        setEditCount((previous) => previous + 1)
-      }
-      return option
-    })
-  }
-
-  const handleSubmitAnswer = async () => {
-    if (!currentQuestion || !selectedAnswer || loading) return
-
-    setLoading(true)
-    setError("")
-
-    const answerTimeSeconds = (Date.now() - questionStartTime) / 1000
-    const submissionTimeSeconds = (Date.now() - examTimerStartTime) / 1000
-
-    try {
-      await client.post("/api/behavioral/event", {
-        exam_id: examId,
-        question_id: currentQuestion.question_id,
-        answer_time_seconds: answerTimeSeconds,
-        submission_time_seconds: submissionTimeSeconds,
-        edit_count: editCount,
-        answer: selectedAnswer,
-      })
-
-      await client.post("/api/activity/event", {
-        exam_id: examId,
-        event_type: "answer_selected",
-        details: { question_id: currentQuestion.question_id },
-        timestamp: new Date().toISOString(),
-      })
-
-      setSubmissionTimes((previous) => [...previous, submissionTimeSeconds])
-      setEditCount(0)
-
-      const response = await client.get<NextQuestionResponse>("/api/questions/next", {
-        params: { exam_id: examId },
-      })
-
-      if (response.data.data.exam_complete || !response.data.data.question) {
-        await handleSubmitExam()
-        return
-      }
-
-      setCurrentQuestion(response.data.data.question)
-      setSelectedAnswer("")
-      setQuestionStartTime(Date.now())
-    } catch (answerError) {
-      setError(getErrorMessage(answerError))
     } finally {
       setLoading(false)
     }
@@ -577,7 +605,11 @@ export default function ExamPage() {
                 </div>
                 <p className="muted">Starts: {formatLocalDateTime(examStartTime)}</p>
                 <p className="muted">Ends: {formatLocalDateTime(examEndTime)}</p>
-                <p className="muted">{canJoinExam ? "You can join this exam now." : "This exam is not open for joining yet."}</p>
+                {new Date(examStartTime).getTime() > currentTime ? (
+                  <div className="alert alert-warning">
+                    Exam starts at {formatLocalDateTime(examStartTime)}. Please come back then.
+                  </div>
+                ) : null}
                 {canJoinExam ? (
                   <button type="button" className="btn btn-primary btn-full" onClick={() => void handleEnroll()} disabled={loading}>
                     {loading ? <span className="spinner" aria-label="Loading" /> : "Join Exam"}
@@ -610,16 +642,6 @@ export default function ExamPage() {
               {countdownSeconds > 0 && examState !== "TEACHER_APPROVED" ? (
                 <p className="muted">Exam opens in {formatTime(countdownSeconds)}</p>
               ) : null}
-              <div className="stats-grid" style={{ marginTop: 16 }}>
-                <div className="stat-card">
-                  <div className="stat-value">{studentsCount}/{maxStudents}</div>
-                  <div className="stat-label">Enrolled</div>
-                </div>
-                <div className="stat-card">
-                  <div className="stat-value">{formatLocalDateTime(examStartTime)}</div>
-                  <div className="stat-label">Start Time</div>
-                </div>
-              </div>
               {resumeMessage ? <div className="alert alert-success" style={{ marginTop: 16 }}>{resumeMessage}</div> : null}
               {error ? <div className="alert alert-error" style={{ marginTop: 16 }}>{error}</div> : null}
             </div>
@@ -700,88 +722,215 @@ export default function ExamPage() {
     )
   }
 
+  if (!currentQuestion) {
+    return (
+      <div>
+        <header className="navbar">
+          <span className="navbar-brand">SecureExam</span>
+          <div className="navbar-right">
+            <span className="muted">{user?.username}</span>
+            <span className={`timer-value ${timerColor}`}>{formatTime(remainingSeconds)}</span>
+          </div>
+        </header>
+        <div className="page">
+          {error ? <div className="alert alert-error">{error}</div> : null}
+          <div className="card" style={{ minHeight: 220, display: "grid", placeItems: "center" }}>
+            <span className="spinner" aria-label="Loading" />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div>
-      <header className="navbar">
-        <div className="navbar-brand">SecureExam</div>
+    <>
+      <div className="navbar">
+        <span className="navbar-brand">SecureExam</span>
         <div className="navbar-right">
-          <span className="badge badge-zinc">{user?.username || "Unknown"}</span>
-          <span className="badge badge-zinc">{user?.role || "student"}</span>
-          <button type="button" className="btn btn-ghost" onClick={handleLogout}>
-            Logout
+          <span className="muted">{user?.username}</span>
+          <span className={`timer-value ${timerColor}`}>{formatTime(remainingSeconds)}</span>
+          <button className="btn btn-ghost" onClick={() => setShowMap(true)}>
+            Question Map
           </button>
         </div>
-      </header>
+      </div>
 
-      <main className="page">
-        <section className="card" style={{ display: "grid", gap: 20 }}>
-          <div>
-            <span className="label">Student Workspace</span>
-            <h1>Secure Exam Session</h1>
+      <div className="page">
+        {error ? <div className="alert alert-error">{error}</div> : null}
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span className="muted">
+            Question {currentIndex + 1} of {questions.length}
+          </span>
+          <span className="muted">
+            {answeredCount} answered · {totalMarks} total marks
+            {savingAnswer ? " · saving..." : ""}
+          </span>
+        </div>
+
+        <div className="card">
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+            <span className="badge badge-zinc">Q{currentIndex + 1}</span>
+            <span className="badge badge-white">{currentQuestion.marks} mark{currentQuestion.marks > 1 ? "s" : ""}</span>
           </div>
 
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <span className="badge badge-zinc">Username: {user?.username || "Unknown"}</span>
-            <span className="badge badge-zinc">Role: {user?.role || "student"}</span>
-          </div>
+          <h3 style={{ marginBottom: 20, fontSize: "1.05rem", color: "#f4f4f5" }}>
+            {currentQuestion.text}
+          </h3>
 
-          <div className="timer-bar">
-            <span>Exam Timer</span>
-            <span className={`timer-value ${remainingSeconds < 60 ? "red" : remainingSeconds < 300 ? "orange" : "green"}`}>
-              {formatTime(remainingSeconds)}
-            </span>
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-            <p>Answer questions one by one and submit before time runs out.</p>
-            {currentQuestion ? <strong>Question {submissionTimes.length + 1} of ?</strong> : null}
-          </div>
-
-          {error ? <div className="alert alert-error">{error}</div> : null}
-
-          {loading && !currentQuestion ? (
-            <div className="card" style={{ minHeight: 220, display: "grid", placeItems: "center" }}>
-              <span className="spinner" aria-label="Loading" />
+          {currentQuestion.question_type === "mcq" ? (
+            <div>
+              {currentQuestion.options.map((opt, i) => (
+                <button
+                  key={`${currentQuestion.question_id}-${i}`}
+                  className={`option-btn ${answers[currentQuestion.question_id] === opt ? "selected" : ""}`}
+                  onClick={() => void handleSelectAnswer(opt)}
+                >
+                  {String.fromCharCode(65 + i)}. {opt}
+                </button>
+              ))}
             </div>
           ) : null}
 
-          {currentQuestion ? (
-            <div style={{ display: "grid", gap: 18 }}>
-              <div>
-                <div className="label">Question</div>
-                <h2 style={{ marginTop: 14 }}>{currentQuestion.text}</h2>
-              </div>
+          {currentQuestion.question_type === "text" ? (
+            <div className="field">
+              <textarea
+                className="input"
+                rows={5}
+                style={{ resize: "vertical" }}
+                placeholder={
+                  currentQuestion.word_limit > 0
+                    ? `Answer in max ${currentQuestion.word_limit} words`
+                    : "Type your answer here"
+                }
+                value={answers[currentQuestion.question_id] || ""}
+                onChange={(event) => handleTextAnswer(event.target.value)}
+              />
+              {currentQuestion.word_limit > 0 ? (
+                <span className="muted">
+                  {(answers[currentQuestion.question_id] || "").trim().split(/\s+/).filter(Boolean).length}
+                  / {currentQuestion.word_limit} words
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
 
-              <div style={{ display: "grid", gap: 12 }}>
-                {currentQuestion.options.map((option) => {
-                  const isSelected = selectedAnswer === option
-                  return (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() => handleSelectAnswer(option)}
-                      className={`option-btn ${isSelected ? "selected" : ""}`}
-                    >
-                      {option}
-                    </button>
-                  )
-                })}
-              </div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "space-between" }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-ghost" disabled={currentIndex === 0} onClick={handlePrevious}>
+              ← Previous
+            </button>
+            <button className="btn btn-ghost" onClick={handleSkip}>
+              Skip
+            </button>
+            <button className="btn btn-primary" disabled={currentIndex === questions.length - 1} onClick={handleNext}>
+              Next →
+            </button>
+          </div>
+          <button className="btn btn-danger" onClick={() => setShowSubmitConfirm(true)}>
+            Submit Exam
+          </button>
+        </div>
+      </div>
 
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
-                <span className="progress-text">Questions answered: {submissionTimes.length}</span>
-                <button type="button" className="btn btn-primary" onClick={() => void handleSubmitAnswer()} disabled={loading || !selectedAnswer}>
-                  {loading ? <span className="spinner" aria-label="Loading" /> : "Submit Answer"}
+      {showMap ? (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.7)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 50,
+          }}
+        >
+          <div className="card" style={{ width: "min(500px,90vw)", maxHeight: "80vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+              <h2 style={{ margin: 0 }}>Question Map</h2>
+              <button className="btn btn-ghost" onClick={() => setShowMap(false)}>✕</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+              {questions.map((q, i) => (
+                <button
+                  key={q.question_id}
+                  onClick={() => {
+                    setCurrentIndex(i)
+                    setShowMap(false)
+                    if (!questionStartTimes[q.question_id]) {
+                      setQuestionStartTimes((prev) => ({ ...prev, [q.question_id]: Date.now() }))
+                    }
+                  }}
+                  style={{
+                    padding: "10px",
+                    borderRadius: 8,
+                    border: "1px solid",
+                    borderColor: String(answers[q.question_id] || "").trim() ? "#4ade80" : "#27272a",
+                    background: String(answers[q.question_id] || "").trim() ? "rgba(34,197,94,0.1)" : "#09090b",
+                    color: i === currentIndex ? "#f4f4f5" : "#a1a1aa",
+                    cursor: "pointer",
+                    fontWeight: i === currentIndex ? 700 : 400,
+                  }}
+                >
+                  {i + 1}
                 </button>
-              </div>
+              ))}
             </div>
-          ) : (
-            <div className="card" style={{ minHeight: 220, display: "grid", placeItems: "center" }}>
-              <span className="spinner" aria-label="Loading" />
+            <hr className="divider" />
+            <div style={{ display: "flex", gap: 16 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.8rem", color: "#a1a1aa" }}>
+                <span style={{ width: 12, height: 12, borderRadius: 3, background: "rgba(34,197,94,0.3)", display: "inline-block" }} />
+                Answered ({answeredCount})
+              </span>
+              <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.8rem", color: "#a1a1aa" }}>
+                <span style={{ width: 12, height: 12, borderRadius: 3, background: "#27272a", display: "inline-block" }} />
+                Unanswered ({questions.length - answeredCount})
+              </span>
             </div>
-          )}
-        </section>
-      </main>
-    </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showSubmitConfirm ? (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.7)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 50,
+          }}
+        >
+          <div className="card" style={{ width: "min(400px,90vw)" }}>
+            <h2>Submit Exam?</h2>
+            <p className="muted" style={{ marginBottom: 20 }}>
+              You have answered {answeredCount} of {questions.length} questions.
+              {questions.length - answeredCount > 0
+                ? ` ${questions.length - answeredCount} questions are unanswered.`
+                : ""}
+              {" "}
+              This action cannot be undone.
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn btn-ghost btn-full" onClick={() => setShowSubmitConfirm(false)}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-danger btn-full"
+                onClick={() => {
+                  setShowSubmitConfirm(false)
+                  void handleSubmitExam()
+                }}
+              >
+                Yes, Submit
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   )
 }

@@ -3,14 +3,22 @@ from flask import Blueprint
 from middleware.jwt_auth import jwt_required, role_required
 from modules.questions.controller import (
   approve_exam_route,
+  approve_student_route,
   create,
   create_exam_route,
+  delete_exam_route,
+  delete_question_route,
   enroll_student_route,
   get_exam_route,
   get_exam_public_route,
+  get_exam_students_route,
+  list_all_for_student_route,
+  list_answers_route,
   list_all,
   list_exams_route,
-  next_q,
+  save_answer_route,
+  update_exam_route,
+  update_question_route,
   health,
 )
 
@@ -61,12 +69,83 @@ def create_route():
     return create()
 
 
-@questions_bp.route("/next", methods=["GET"])
+@questions_bp.route("/exam/<exam_id>/all", methods=["GET"])
 @jwt_required
 @role_required("student")
-def next_route():
+def all_questions_for_student_route(exam_id):
     """
-    Get the next unanswered question for the authenticated student.
+    Get all exam questions for the authenticated student.
+    ---
+    tags:
+      - Questions
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: exam_id
+        type: string
+        required: true
+    responses:
+      200:
+        description: Questions returned
+      401:
+        description: Invalid or missing JWT
+      403:
+        description: Exam not in progress
+    """
+    return list_all_for_student_route(exam_id)
+
+
+@questions_bp.route("/answer/save", methods=["POST"])
+@jwt_required
+@role_required("student")
+def save_answer_bp_route():
+    """
+    Save one student answer.
+    ---
+    tags:
+      - Questions
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - exam_id
+            - question_id
+            - answer
+            - time_taken_seconds
+          properties:
+            exam_id:
+              type: string
+            question_id:
+              type: string
+            answer:
+              type: string
+            time_taken_seconds:
+              type: number
+    responses:
+      200:
+        description: Answer saved
+      400:
+        description: Bad request
+      401:
+        description: Invalid or missing JWT
+      403:
+        description: Forbidden
+    """
+    return save_answer_route()
+
+
+@questions_bp.route("/answer/list", methods=["GET"])
+@jwt_required
+@role_required("student")
+def list_answers_bp_route():
+    """
+    List saved answers for the authenticated student in an exam.
     ---
     tags:
       - Questions
@@ -79,13 +158,15 @@ def next_route():
         required: true
     responses:
       200:
-        description: Next question returned
+        description: Answers returned
+      400:
+        description: Bad request
       401:
         description: Invalid or missing JWT
       403:
-        description: Exam not in progress
+        description: Forbidden
     """
-    return next_q()
+    return list_answers_route()
 
 
 @questions_bp.route("/list/<exam_id>", methods=["GET"])
@@ -322,3 +403,230 @@ def enroll_student_bp_route():
         description: Exam full or invalid state
     """
     return enroll_student_route()
+
+
+@questions_bp.route("/exams/<exam_id>", methods=["PUT"])
+@jwt_required
+@role_required("teacher")
+def update_exam_bp_route(exam_id):
+    """
+    Update an exam (teacher only).
+    ---
+    tags:
+      - Questions
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: exam_id
+        type: string
+        required: true
+      - in: body
+        name: body
+        required: false
+        schema:
+          type: object
+          properties:
+            title:
+              type: string
+            description:
+              type: string
+            duration_minutes:
+              type: integer
+            max_students:
+              type: integer
+            start_time:
+              type: string
+            end_time:
+              type: string
+    responses:
+      200:
+        description: Exam updated
+      400:
+        description: Bad request
+      401:
+        description: Invalid or missing JWT
+      403:
+        description: Forbidden
+      404:
+        description: Exam not found
+    """
+    return update_exam_route(exam_id)
+
+
+@questions_bp.route("/exams/<exam_id>", methods=["DELETE"])
+@jwt_required
+@role_required("teacher")
+def delete_exam_bp_route(exam_id):
+    """
+    Delete an exam (teacher only).
+    ---
+    tags:
+      - Questions
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: exam_id
+        type: string
+        required: true
+    responses:
+      200:
+        description: Exam deleted
+      401:
+        description: Invalid or missing JWT
+      403:
+        description: Forbidden
+      404:
+        description: Exam not found
+      409:
+        description: Cannot delete - exam in progress or has students
+    """
+    return delete_exam_route(exam_id)
+
+
+@questions_bp.route("/<question_id>", methods=["PUT"])
+@jwt_required
+@role_required("teacher")
+def update_question_bp_route(question_id):
+    """
+    Update a question (teacher only).
+    ---
+    tags:
+      - Questions
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: question_id
+        type: string
+        required: true
+      - in: body
+        name: body
+        required: false
+        schema:
+          type: object
+          properties:
+            text:
+              type: string
+            question_type:
+              type: string
+            options:
+              type: array
+            correct_answer:
+              type: string
+            marks:
+              type: integer
+            word_limit:
+              type: integer
+    responses:
+      200:
+        description: Question updated
+      400:
+        description: Bad request
+      401:
+        description: Invalid or missing JWT
+      403:
+        description: Forbidden
+      404:
+        description: Question not found
+    """
+    return update_question_route(question_id)
+
+
+@questions_bp.route("/<question_id>", methods=["DELETE"])
+@jwt_required
+@role_required("teacher")
+def delete_question_bp_route(question_id):
+    """
+    Delete a question (teacher only).
+    ---
+    tags:
+      - Questions
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: question_id
+        type: string
+        required: true
+    responses:
+      200:
+        description: Question deleted
+      401:
+        description: Invalid or missing JWT
+      403:
+        description: Forbidden
+      404:
+        description: Question not found
+    """
+    return delete_question_route(question_id)
+
+
+@questions_bp.route("/exams/<exam_id>/students", methods=["GET"])
+@jwt_required
+@role_required("teacher")
+def get_exam_students_bp_route(exam_id):
+    """
+    Get list of students who joined an exam (teacher only).
+    ---
+    tags:
+      - Questions
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: exam_id
+        type: string
+        required: true
+    responses:
+      200:
+        description: Students returned
+      401:
+        description: Invalid or missing JWT
+      403:
+        description: Forbidden
+      404:
+        description: Exam not found
+    """
+    return get_exam_students_route(exam_id)
+
+
+@questions_bp.route("/exams/students/approve", methods=["POST"])
+@jwt_required
+@role_required("teacher")
+def approve_student_bp_route():
+    """
+    Approve a student to take an exam (teacher only).
+    ---
+    tags:
+      - Questions
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - exam_id
+            - student_id
+          properties:
+            exam_id:
+              type: string
+            student_id:
+              type: string
+    responses:
+      200:
+        description: Student approved
+      400:
+        description: Bad request
+      401:
+        description: Invalid or missing JWT
+      403:
+        description: Forbidden
+      404:
+        description: Exam or student not found
+    """
+    return approve_student_route()

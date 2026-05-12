@@ -91,19 +91,41 @@ def generate_activation_code(user_context, payload):
     if not exam:
         raise ExamNotFoundException()
 
+    # Check if an unexpired activation code already exists for this exam
+    existing_code = exam.get("activation_code")
+    existing_expires = exam.get("activation_code_expires_at")
+    
+    if existing_code and existing_expires and not _is_expired(existing_expires):
+        # Unexpired code already exists, return it
+        _send_log(
+            LogLevel.INFO.value,
+            "activation_code_retrieved",
+            exam_id,
+            {"exam_id": exam_id},
+            (user_context or {}).get("user_id"),
+        )
+        return {
+            "code": existing_code,
+            "exam_id": exam_id,
+            "expires_in_minutes": 10,
+            "is_new": False,
+        }
+
     if exam.get("state") != ExamState.TEACHER_APPROVED.value:
         raise BadRequestException("Exam must be in TEACHER_APPROVED state")
 
+    # Generate new code
     code = _generate_code()
     code_hash = _code_hash(code)
     current = now()
+    expires_at = current + timedelta(minutes=10)
 
     doc = {
         "exam_id": exam_id,
         "code_hash": code_hash,
         "created_by": (user_context or {}).get("user_id"),
         "created_at": current,
-        "expires_at": current + timedelta(minutes=10),
+        "expires_at": expires_at,
         "is_used": False,
         "used_by": None,
         "used_at": None,
@@ -111,6 +133,16 @@ def generate_activation_code(user_context, payload):
 
     try:
         activation_codes_col.insert_one(doc)
+        # Also store at exam level for easy retrieval
+        exams_col.update_one(
+            {"_id": ObjectId(exam_id)},
+            {
+                "$set": {
+                    "activation_code": code,
+                    "activation_code_expires_at": expires_at,
+                }
+            },
+        )
     except PyMongoError as exc:
         raise DatabaseException(str(exc))
 
@@ -126,6 +158,7 @@ def generate_activation_code(user_context, payload):
         "code": code,
         "exam_id": exam_id,
         "expires_in_minutes": 10,
+        "is_new": True,
     }
 
 
@@ -149,9 +182,6 @@ def validate_activation_code(user_context, payload):
         )
         raise BadRequestException("Invalid activation code")
 
-    if activation.get("is_used"):
-        raise ActivationCodeAlreadyUsedException()
-
     expires_at = activation.get("expires_at")
     if _is_expired(expires_at):
         _send_log(
@@ -164,17 +194,8 @@ def validate_activation_code(user_context, payload):
         raise BadRequestException("Activation code has expired")
 
     try:
-        activation_codes_col.update_one(
-            {"_id": activation.get("_id")},
-            {
-                "$set": {
-                    "is_used": True,
-                    "used_by": (user_context or {}).get("user_id"),
-                    "used_at": now(),
-                }
-            },
-        )
-
+        # Don't mark as used - allow multiple students to use same code
+        # Just update the exam state to ACTIVATION_VALID
         exams_col.update_one(
             {"_id": ObjectId(exam_id)},
             {"$set": {"state": ExamState.ACTIVATION_VALID.value}},
@@ -199,6 +220,16 @@ def get_activation_status(exam_id):
     exam_id = _validate_exam_id(exam_id)
 
     try:
+        exam = exams_col.find_one({"_id": ObjectId(exam_id)})
+    except (InvalidId, TypeError):
+        raise ExamNotFoundException()
+    except PyMongoError as exc:
+        raise DatabaseException(str(exc))
+
+    if not exam:
+        raise ExamNotFoundException()
+
+    try:
         activation = activation_codes_col.find({"exam_id": exam_id}).sort("created_at", -1).limit(1)
         latest = next(activation, None)
     except PyMongoError as exc:
@@ -213,6 +244,7 @@ def get_activation_status(exam_id):
 
     return {
         "exam_id": exam_id,
+        "code": exam.get("activation_code"),
         "is_used": bool(latest.get("is_used", False)),
         "used_by": latest.get("used_by"),
         "used_at": _iso_dt(used_at),

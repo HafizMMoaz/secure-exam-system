@@ -39,6 +39,8 @@ export interface Question {
   options: string[]
   marks: number
   order_index: number
+  question_type: "mcq" | "text"
+  word_limit: number
 }
 
 export interface Exam {
@@ -52,15 +54,20 @@ export interface Exam {
   students_count: number
   start_time: string
   end_time: string
+  total_questions: number
+  total_marks: number
 }
 
 export interface QuestionWithAnswer {
   question_id: string
+  exam_id?: string
   text: string
   options: string[]
   correct_answer: string
   marks: number
   order_index: number
+  question_type: "mcq" | "text"
+  word_limit: number
 }
 
 export interface StudentUser {

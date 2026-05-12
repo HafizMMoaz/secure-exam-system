@@ -6,6 +6,7 @@ from config.swagger import init_swagger
 from routes import register_routes
 from routes.health import global_health as get_global_health
 from config.config import PORT, FRONTEND_URL
+from jobs import start_auto_submit_job
 
 app = Flask(__name__)
 CORS(app, origins=[FRONTEND_URL], supports_credentials=True)
@@ -17,6 +18,7 @@ init_swagger(app)
 register_error_handlers(app)
 
 register_routes(app)
+start_auto_submit_job()
 
 
 # ── Global health check ───────────────────────────────────────────────────────
