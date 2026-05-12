@@ -157,3 +157,7 @@ def _send_security_log(user_id, violations):
 
 def log_validation_failure(user_id, violations):
     _send_security_log(user_id, violations)
+
+
+def get_health():
+    return {"module_name": ModuleName.VALIDATION.value, "dependencies": [], "version": "1.0.0", "healthy": True}
