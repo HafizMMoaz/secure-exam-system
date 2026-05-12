@@ -47,7 +47,9 @@ jobs:
           echo "PORT=5500" >> $GITHUB_ENV
 
       - name: Install backend dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-test.txt
 
       - name: Compile backend Python files
         run: |
@@ -71,6 +73,9 @@ jobs:
       - name: Smoke test /api/health
         run: |
           curl --fail --retry 20 --retry-delay 1 --retry-connrefused http://127.0.0.1:5500/api/health
+
+      - name: Run PRD §27.8 integration tests
+        run: python -m pytest tests/ -v --tb=short
 
       - name: Show backend log on failure
         if: failure()
