@@ -71,9 +71,29 @@ def write_log(payload):
 
     try:
         result = logs_col.insert_one(doc)
-        return str(result.inserted_id)
     except PyMongoError as exc:
         raise DatabaseException(str(exc))
+
+    # §24 bonus: broadcast every new log to the WebSocket logs room so the
+    # teacher audit-log UI updates in real time without polling.
+    try:
+        from middleware.socketio_app import emit_log_event
+        ws_doc = {
+            "log_id": str(result.inserted_id),
+            "module": module,
+            "level": level,
+            "user_id": user_id,
+            "exam_id": exam_id or "",
+            "action": action,
+            "details": details,
+            "timestamp": timestamp,
+            "integrity_hash": integrity_hash,
+        }
+        emit_log_event(ws_doc)
+    except Exception:
+        pass
+
+    return str(result.inserted_id)
 
 
 def verify_log(log_id):

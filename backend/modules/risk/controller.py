@@ -1,18 +1,7 @@
-from flask import Response, request, stream_with_context
+from flask import request
 
 from responses import success_response, health_response
-from modules.risk.service import compute_exam_risk, get_dashboard, get_student_score, get_health, stream_events
-
-
-def stream(exam_id):
-    return Response(
-        stream_with_context(stream_events(exam_id)),
-        mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
+from modules.risk.service import compute_exam_risk, get_dashboard, get_student_score, get_health
 
 
 def compute(exam_id):

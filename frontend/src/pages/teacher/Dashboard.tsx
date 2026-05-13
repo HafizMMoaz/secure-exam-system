@@ -1,6 +1,23 @@
-import { useEffect, useState, type MouseEvent } from "react"
+import { useEffect, useRef, useState, type MouseEvent } from "react"
 import axios from "axios"
 import { useNavigate } from "react-router-dom"
+import { io, type Socket } from "socket.io-client"
+import {
+  BookOpen,
+  LayoutDashboard,
+  FileQuestion,
+  ScrollText,
+  ShieldAlert,
+  ShieldCheck,
+  Users,
+  LogOut,
+  Radio,
+  Activity,
+  Clipboard,
+  Eye,
+  Zap,
+  Gauge,
+} from "lucide-react"
 import client from "../../api/client"
 import { useAuth } from "../../hooks/useAuth"
 import type { ApiResponse, Exam, LogEntry, QuestionWithAnswer, RiskScore, StudentUser } from "../../types"
@@ -55,6 +72,37 @@ function normalizeArray<T>(payload: unknown, keys: string[]): T[] {
   return []
 }
 
+function humanizeAction(action: string): string {
+  if (!action) return "—"
+  const map: Record<string, string> = {
+    user_login: "Signed in",
+    user_logout: "Signed out",
+    exam_started: "Started the exam",
+    exam_submitted: "Submitted the exam",
+    exam_approved: "Exam approved",
+    exam_auto_submitted: "Auto-submitted (time up)",
+    exam_state_transition: "Stage changed",
+    tab_switch_detected: "Switched away from the exam",
+    tab_focus_returned: "Returned to the exam",
+    clipboard_paste_detected: "Pasted text",
+    clipboard_copy_detected: "Copied text",
+    clipboard_cut_detected: "Cut text",
+    idle_period_detected: "Was idle",
+    fast_answer_detected: "Answered very quickly",
+    risk_score_computed: "Risk score calculated",
+    otp_issued: "One-time code issued",
+    otp_consumed: "Signed in with one-time code",
+    otp_expired: "One-time code expired",
+    otp_bad_code: "One-time code rejected",
+    otp_max_attempts: "Too many code attempts",
+    user_active_toggled: "Account access changed",
+    input_validation_failed: "Suspicious input blocked",
+    suspicious_behavior_detected: "Suspicious behaviour",
+  }
+  if (map[action]) return map[action]
+  return action.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 function getStateBadgeClass(state: string) {
   switch (state) {
     case "NOT_STARTED":
@@ -98,6 +146,7 @@ export default function Dashboard() {
   const [newExamDesc, setNewExamDesc] = useState("")
   const [newExamDuration, setNewExamDuration] = useState(60)
   const [newExamMaxStudents, setNewExamMaxStudents] = useState(30)
+  const [newExamDate, setNewExamDate] = useState("")
   const [newExamStartTime, setNewExamStartTime] = useState("")
   const [newExamEndTime, setNewExamEndTime] = useState("")
   const [questionText, setQuestionText] = useState("")
@@ -112,6 +161,9 @@ export default function Dashboard() {
   const [students, setStudents] = useState<StudentUser[]>([])
   const [liveEvents, setLiveEvents] = useState<Array<{ kind: string; user_id?: string; timestamp?: string }>>([])
   const [liveConnected, setLiveConnected] = useState(false)
+  const [logsLive, setLogsLive] = useState(false)
+  const logsSocketRef = useRef<Socket | null>(null)
+  const riskSocketRef = useRef<Socket | null>(null)
   const [riskSort, setRiskSort] = useState<{ key: "score" | "risk_level" | "username"; dir: "asc" | "desc" }>({ key: "score", dir: "desc" })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -126,6 +178,7 @@ export default function Dashboard() {
   const [editExamDesc, setEditExamDesc] = useState("")
   const [editExamDuration, setEditExamDuration] = useState(60)
   const [editExamMaxStudents, setEditExamMaxStudents] = useState(30)
+  const [editExamDate, setEditExamDate] = useState("")
   const [editExamStartTime, setEditExamStartTime] = useState("")
   const [editExamEndTime, setEditExamEndTime] = useState("")
   const [deleteExamId, setDeleteExamId] = useState("")
@@ -231,8 +284,8 @@ export default function Dashboard() {
       return
     }
 
-    if (!newExamStartTime || !newExamEndTime) {
-      setError("Start time and end time are required")
+    if (!newExamDate || !newExamStartTime || !newExamEndTime) {
+      setError("Please pick a date, a start time and an end time.")
       return
     }
 
@@ -246,10 +299,14 @@ export default function Dashboard() {
       return
     }
 
-    const startTimeDate = new Date(newExamStartTime)
-    const endTimeDate = new Date(newExamEndTime)
+    const startTimeDate = new Date(`${newExamDate}T${newExamStartTime}`)
+    const endTimeDate = new Date(`${newExamDate}T${newExamEndTime}`)
     if (Number.isNaN(startTimeDate.getTime()) || Number.isNaN(endTimeDate.getTime())) {
-      setError("Start time and end time must be valid dates")
+      setError("That date and time don't look right.")
+      return
+    }
+    if (endTimeDate <= startTimeDate) {
+      setError("End time must be after start time.")
       return
     }
 
@@ -289,6 +346,7 @@ export default function Dashboard() {
       setNewExamDesc("")
       setNewExamDuration(60)
       setNewExamMaxStudents(30)
+      setNewExamDate("")
       setNewExamStartTime("")
       setNewExamEndTime("")
       setSuccess("Exam created")
@@ -548,8 +606,23 @@ export default function Dashboard() {
     setEditExamDesc(exam.description)
     setEditExamDuration(exam.duration_minutes)
     setEditExamMaxStudents(exam.max_students)
-    setEditExamStartTime(exam.start_time)
-    setEditExamEndTime(exam.end_time)
+    // Split the stored ISO into date + time fields for the form.
+    const start = new Date(exam.start_time)
+    const end = new Date(exam.end_time)
+    if (!Number.isNaN(start.getTime())) {
+      const pad = (n: number) => String(n).padStart(2, "0")
+      setEditExamDate(`${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`)
+      setEditExamStartTime(`${pad(start.getHours())}:${pad(start.getMinutes())}`)
+    } else {
+      setEditExamDate("")
+      setEditExamStartTime("")
+    }
+    if (!Number.isNaN(end.getTime())) {
+      const pad = (n: number) => String(n).padStart(2, "0")
+      setEditExamEndTime(`${pad(end.getHours())}:${pad(end.getMinutes())}`)
+    } else {
+      setEditExamEndTime("")
+    }
   }
 
   const handleUpdateExam = async () => {
@@ -561,8 +634,8 @@ export default function Dashboard() {
       return
     }
 
-    if (!editExamStartTime || !editExamEndTime) {
-      setError("Start time and end time are required")
+    if (!editExamDate || !editExamStartTime || !editExamEndTime) {
+      setError("Please pick a date, a start time and an end time.")
       return
     }
 
@@ -581,8 +654,18 @@ export default function Dashboard() {
     setSuccess("")
 
     try {
-      const startTimeDate = new Date(editExamStartTime)
-      const endTimeDate = new Date(editExamEndTime)
+      const startTimeDate = new Date(`${editExamDate}T${editExamStartTime}`)
+      const endTimeDate = new Date(`${editExamDate}T${editExamEndTime}`)
+      if (Number.isNaN(startTimeDate.getTime()) || Number.isNaN(endTimeDate.getTime())) {
+        setError("That date and time don't look right.")
+        setLoading(false)
+        return
+      }
+      if (endTimeDate <= startTimeDate) {
+        setError("End time must be after start time.")
+        setLoading(false)
+        return
+      }
       const startTimeIso = startTimeDate.toISOString()
       const endTimeIso = endTimeDate.toISOString()
 
@@ -813,49 +896,195 @@ export default function Dashboard() {
     }
   }
 
+  // Real-time monitoring events on the Risk tab — subscribes to exam:<id>
+  // room over WebSocket whenever the Risk tab is open and an exam is loaded.
+  useEffect(() => {
+    if (tab !== "risk" || !examId) {
+      if (riskSocketRef.current) {
+        riskSocketRef.current.disconnect()
+        riskSocketRef.current = null
+        setLiveConnected(false)
+      }
+      return
+    }
+
+    const base = client.defaults.baseURL || window.location.origin
+    const socket = io(`${base}/monitoring`, {
+      transports: ["websocket", "polling"],
+      reconnection: true,
+    })
+    riskSocketRef.current = socket
+
+    socket.on("connect", () => socket.emit("subscribe", { exam_id: examId }))
+    socket.on("subscribed", () => setLiveConnected(true))
+    socket.on("disconnect", () => setLiveConnected(false))
+
+    const onEvent = (kind: string) => (data: { user_id?: string; timestamp?: string }) => {
+      setLiveEvents((prev) => [{ kind, user_id: data.user_id, timestamp: data.timestamp }, ...prev].slice(0, 50))
+    }
+    socket.on("tab_event", onEvent("tab_event"))
+    socket.on("clipboard_event", onEvent("clipboard_event"))
+    socket.on("activity_event", onEvent("activity_event"))
+    socket.on("behavioral_event", onEvent("behavioral_event"))
+
+    return () => {
+      socket.disconnect()
+      riskSocketRef.current = null
+      setLiveConnected(false)
+    }
+  }, [tab, examId])
+
+  // Real-time audit logs over WebSocket. Subscribes only while the logs tab is
+  // mounted; tears down on leave or unmount.
+  useEffect(() => {
+    if (tab !== "logs") {
+      if (logsSocketRef.current) {
+        logsSocketRef.current.disconnect()
+        logsSocketRef.current = null
+        setLogsLive(false)
+      }
+      return
+    }
+
+    const base = client.defaults.baseURL || window.location.origin
+    const socket = io(`${base}/monitoring`, {
+      transports: ["websocket", "polling"],
+      reconnection: true,
+    })
+    logsSocketRef.current = socket
+
+    socket.on("connect", () => socket.emit("subscribe_logs"))
+    socket.on("logs_subscribed", () => setLogsLive(true))
+    socket.on("disconnect", () => setLogsLive(false))
+    socket.on("log_event", (incoming: LogEntry) => {
+      setLogs((prev) => [{ ...incoming, received_at: incoming.timestamp } as LogEntry, ...prev].slice(0, 500))
+    })
+
+    return () => {
+      socket.disconnect()
+      logsSocketRef.current = null
+      setLogsLive(false)
+    }
+  }, [tab])
+
+  const navItems: Array<{ key: Tab; label: string; icon: typeof BookOpen }> = [
+    { key: "exams", label: "Exams", icon: BookOpen },
+    { key: "overview", label: "Overview", icon: LayoutDashboard },
+    { key: "questions", label: "Questions", icon: FileQuestion },
+    { key: "logs", label: "Activity", icon: ScrollText },
+    { key: "risk", label: "Risk", icon: ShieldAlert },
+    { key: "students", label: "Students", icon: Users },
+  ]
+
+  const pageMeta: Record<Tab, { title: string; sub: string }> = {
+    exams: { title: "Exams", sub: "Create exams, approve students, and start the timer." },
+    overview: { title: "Overview", sub: "A quick summary of the exam you have open." },
+    questions: { title: "Questions", sub: "Add, edit, or remove the questions on this paper." },
+    logs: { title: "Activity", sub: "Recent activity from students and the system, updated live." },
+    risk: { title: "Risk", sub: "See which students may need a closer look." },
+    students: { title: "Students", sub: "Who has joined this exam." },
+  }
+  const currentMeta = pageMeta[tab]
+
   return (
-    <div>
-      <header className="navbar">
-        <div className="navbar-brand">SecureExam</div>
-        <div className="navbar-right">
-          <span className="badge badge-zinc">{user?.username || "Unknown"}</span>
-          <span className="badge badge-zinc">Exam: {examId || "None"}</span>
-          <button type="button" className="btn btn-ghost" onClick={handleLogout}>
-            Logout
-          </button>
+    <div className="exam-shell">
+      <header className="topbar">
+        <div className="topbar-brand">
+          <span className="topbar-brand-mark"><ShieldCheck size={12} /></span>
+          Secure Exam
+        </div>
+
+        <div className="topbar-context">
+          {selectedExam ? (
+            <>
+              <span className="exam-title">{selectedExam.title}</span>
+              {examState ? (
+                <span className={`badge ${getStateBadgeClass(examState)}`}>
+                  {examState.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())}
+                </span>
+              ) : null}
+            </>
+          ) : (
+            <span className="crumb">No exam selected</span>
+          )}
+        </div>
+
+        <div className="topbar-right">
+          <span className={`live-pill ${liveConnected ? "connected" : ""}`}>
+            <span className="live-dot" />
+            {liveConnected ? "Live" : "Offline"}
+          </span>
+          <span className="topbar-user"><b>{user?.username || "—"}</b></span>
         </div>
       </header>
 
-      <main className="page">
-        <section className="card" style={{ display: "grid", gap: 16 }}>
-          <div>
-            <span className="label">Active Exam ID</span>
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <input
-                className="input"
-                style={{ flex: "1 1 280px" }}
-                value={examIdInput}
-                onChange={(event) => setExamIdInput(event.target.value)}
-                placeholder="Enter active exam ID"
-              />
-              <button type="button" className="btn btn-primary" onClick={() => void handleLoadExam()} disabled={loading}>
-                {loading ? <span className="spinner" aria-label="Loading" /> : "Load Exam"}
-              </button>
+      <div className="app-shell">
+        <nav className="sidebar">
+          <div className="sidebar-group">
+            <div className="sidebar-group-title">Navigation</div>
+            {navItems.map((item) => {
+              const Icon = item.icon
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={`sidebar-link ${tab === item.key ? "active" : ""}`}
+                  onClick={() => setTab(item.key)}
+                >
+                  <Icon /> {item.label}
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="sidebar-group">
+            <div className="sidebar-group-title">Current exam</div>
+            <div style={{ padding: "0 10px" }}>
+              {exams.length > 0 ? (
+                <select
+                  className="select"
+                  value={examId}
+                  onChange={(event) => {
+                    const id = event.target.value
+                    if (!id) return
+                    setExamIdInput(id)
+                    setTimeout(() => void handleLoadExam(), 0)
+                  }}
+                  style={{ fontSize: "0.875rem" }}
+                >
+                  <option value="">Choose an exam…</option>
+                  {exams.map((exam) => (
+                    <option key={exam.exam_id} value={exam.exam_id}>{exam.title}</option>
+                  ))}
+                </select>
+              ) : (
+                <p className="muted" style={{ fontSize: "0.8125rem", padding: 0 }}>
+                  No exams yet — use the <b>Exams</b> tab to create one.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="sidebar-spacer" />
+
+          <div className="sidebar-bottom">
+            <button type="button" className="sidebar-link" onClick={handleLogout}>
+              <LogOut /> Sign out
+            </button>
+          </div>
+
+        </nav>
+
+        <main className="main">
+          <div className="page-header">
+            <div>
+              <h1 className="page-title">{currentMeta.title}</h1>
+              <p className="page-sub">{currentMeta.sub}</p>
             </div>
           </div>
 
           {error ? <div className="alert alert-error">{error}</div> : null}
           {success ? <div className="alert alert-success">{success}</div> : null}
-        </section>
-
-        <section className="card" style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-          <button type="button" className={`btn ${tab === "exams" ? "btn-primary" : "btn-ghost"}`} onClick={() => setTab("exams")}>Exams</button>
-          <button type="button" className={`btn ${tab === "overview" ? "btn-primary" : "btn-ghost"}`} onClick={() => setTab("overview")}>Overview</button>
-          <button type="button" className={`btn ${tab === "questions" ? "btn-primary" : "btn-ghost"}`} onClick={() => setTab("questions")}>Questions</button>
-          <button type="button" className={`btn ${tab === "logs" ? "btn-primary" : "btn-ghost"}`} onClick={() => setTab("logs")}>Logs</button>
-          <button type="button" className={`btn ${tab === "risk" ? "btn-primary" : "btn-ghost"}`} onClick={() => setTab("risk")}>Risk Scores</button>
-          <button type="button" className={`btn ${tab === "students" ? "btn-primary" : "btn-ghost"}`} onClick={() => setTab("students")}>Students</button>
-        </section>
 
         {tab === "exams" ? (
           <section style={{ display: "grid", gap: 18 }}>
@@ -891,17 +1120,23 @@ export default function Dashboard() {
               </div>
 
               <div className="field">
-                <label className="label">Exam Start Time</label>
-                <input className="input" type="datetime-local" value={newExamStartTime} onChange={(event) => setNewExamStartTime(event.target.value)} />
+                <label className="label">Exam date</label>
+                <input className="input" type="date" value={newExamDate} onChange={(event) => setNewExamDate(event.target.value)} />
               </div>
 
-              <div className="field">
-                <label className="label">Exam End Time</label>
-                <input className="input" type="datetime-local" value={newExamEndTime} onChange={(event) => setNewExamEndTime(event.target.value)} />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div className="field">
+                  <label className="label">Starts at</label>
+                  <input className="input" type="time" value={newExamStartTime} onChange={(event) => setNewExamStartTime(event.target.value)} />
+                </div>
+                <div className="field">
+                  <label className="label">Ends at</label>
+                  <input className="input" type="time" value={newExamEndTime} onChange={(event) => setNewExamEndTime(event.target.value)} />
+                </div>
               </div>
 
               <button type="button" className="btn btn-primary" onClick={() => void handleCreateExam()} disabled={loading}>
-                {loading ? <span className="spinner" aria-label="Loading" /> : "Create Exam"}
+                {loading ? <span className="spinner" aria-label="Loading" /> : "Create exam"}
               </button>
             </div>
 
@@ -973,52 +1208,55 @@ export default function Dashboard() {
             {examId ? (
               <>
                 {selectedExam ? (
-                  <div className="card" style={{ display: "grid", gap: 12 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                      <div>
-                        <div className="label">Exam Info</div>
-                        <h2 style={{ marginTop: 12 }}>{selectedExam.title}</h2>
-                        <p className="muted">{selectedExam.description || "No description provided"}</p>
+                  <div className="card" style={{ display: "grid", gap: 16 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
+                      <div style={{ minWidth: 0 }}>
+                        <h2 style={{ marginBottom: 4 }}>{selectedExam.title}</h2>
+                        <p className="muted">{selectedExam.description || "No description"}</p>
                       </div>
-                      <span className={`badge ${getStateBadgeClass(selectedExam.state)}`}>{selectedExam.state}</span>
+                      <span className={`badge ${getStateBadgeClass(selectedExam.state)}`} style={{ flexShrink: 0 }}>{selectedExam.state}</span>
                     </div>
 
-                    <div className="stats-grid">
+                    <div className="stats-grid" style={{ marginBottom: 0 }}>
                       <div className="stat-card">
-                        <div className="stat-value">{selectedExam.duration_minutes}m</div>
-                        <div className="stat-label">Duration</div>
+                        <div className="stat-eyebrow">Duration</div>
+                        <div className="stat-value">{selectedExam.duration_minutes}<span className="stat-suffix">min</span></div>
                       </div>
                       <div className="stat-card">
-                        <div className="stat-value">{selectedExam.students_count}/{selectedExam.max_students}</div>
-                        <div className="stat-label">Enrolled</div>
+                        <div className="stat-eyebrow">Enrolled</div>
+                        <div className="stat-value">{selectedExam.students_count}<span className="stat-suffix">/{selectedExam.max_students}</span></div>
                       </div>
                       <div className="stat-card">
+                        <div className="stat-eyebrow">Questions</div>
                         <div className="stat-value">{selectedExam.total_questions ?? 0}</div>
-                        <div className="stat-label">Total Questions</div>
                       </div>
                       <div className="stat-card">
+                        <div className="stat-eyebrow">Total marks</div>
                         <div className="stat-value">{selectedExam.total_marks ?? 0}</div>
-                        <div className="stat-label">Total Marks</div>
                       </div>
                     </div>
 
-                    <p className="muted">Starts: {formatLocalDateTime(selectedExam.start_time)}</p>
-                    <p className="muted">Ends: {formatLocalDateTime(selectedExam.end_time)}</p>
+                    <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: "0.8125rem", color: "var(--ink-3)" }}>
+                      <span><b style={{ color: "var(--ink-2)" }}>Starts</b> · {formatLocalDateTime(selectedExam.start_time)}</span>
+                      <span><b style={{ color: "var(--ink-2)" }}>Ends</b> · {formatLocalDateTime(selectedExam.end_time)}</span>
+                    </div>
                   </div>
                 ) : null}
 
-                <div className="stats-grid">
+                <div className="stats-grid" style={{ marginBottom: 0 }}>
                   <div className="stat-card">
-                    <div className="stat-value">{examState || "-"}</div>
-                    <div className="stat-label">Exam State</div>
-                  </div>
-                  <div className="stat-card">
+                    <div className="stat-eyebrow">Activity records</div>
                     <div className="stat-value">{logs.length}</div>
-                    <div className="stat-label">Total Logs</div>
                   </div>
                   <div className="stat-card">
-                    <div className="stat-value">{highRiskCount}</div>
-                    <div className="stat-label">High Risk</div>
+                    <div className="stat-eyebrow">High-risk students</div>
+                    <div className="stat-value" style={{ color: highRiskCount > 0 ? "var(--risk-high)" : "var(--ink)" }}>{highRiskCount}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-eyebrow">Current stage</div>
+                    <div className="stat-value" style={{ fontSize: "1rem", fontFamily: "var(--font-sans)", textTransform: "none", letterSpacing: 0 }}>
+                      {examState ? examState.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : "—"}
+                    </div>
                   </div>
                 </div>
 
@@ -1228,151 +1466,167 @@ export default function Dashboard() {
 
         {tab === "logs" ? (
           <section className="card" style={{ display: "grid", gap: 16 }}>
-            <button type="button" className="btn btn-primary" onClick={() => void handleRefreshLogs()} disabled={loading || !examId}>
-              {loading ? <span className="spinner" aria-label="Loading" /> : "Refresh Logs"}
-            </button>
-
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Module</th>
-                    <th>Level</th>
-                    <th>Action</th>
-                    <th>User</th>
-                    <th>Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {logs.map((entry) => (
-                    <tr key={entry.log_id}>
-                      <td>{entry.module}</td>
-                      <td><span className={`badge ${getStateBadgeClass(entry.level)}`}>{entry.level}</span></td>
-                      <td>{entry.action}</td>
-                      <td>{entry.user_id}</td>
-                      <td>{entry.timestamp}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <span className={`live-pill ${logsLive ? "connected" : ""}`}>
+                  <span className="live-dot" />
+                  {logsLive ? "Live · streaming" : "Connecting…"}
+                </span>
+                <span className="muted">{logs.length} entries</span>
+              </div>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => void handleRefreshLogs()} disabled={loading || !examId}>
+                {loading ? <span className="spinner" aria-label="Loading" /> : "Refresh"}
+              </button>
             </div>
+
+            {logs.length === 0 ? (
+              <div className="empty">
+                <ScrollText />
+                <div className="empty-title">No activity yet</div>
+                <div className="empty-body">
+                  Once students start, you&apos;ll see their actions here automatically.
+                </div>
+              </div>
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>When</th>
+                      <th>Who</th>
+                      <th>What happened</th>
+                      <th>Severity</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {logs.map((entry, idx) => (
+                      <tr key={`${entry.log_id}-${idx}`}>
+                        <td className="mono" style={{ color: "var(--ink-3)", whiteSpace: "nowrap" }}>
+                          {entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : "—"}
+                        </td>
+                        <td>{entry.user_id || "system"}</td>
+                        <td>{humanizeAction(entry.action)}</td>
+                        <td><span className={`badge ${getStateBadgeClass(entry.level)}`}>{entry.level}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
         ) : null}
 
         {tab === "risk" ? (
-          <section className="card" style={{ display: "grid", gap: 16 }}>
-            <div style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ display: "flex", gap: 8 }}>
-                <span className={`badge ${liveConnected ? "badge-green" : "badge-zinc"}`}>
-                  {liveConnected ? "Live: connected" : "Live: offline"}
-                </span>
+          <section className="card" style={{ display: "grid", gap: 20 }}>
+            <div style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <button type="button" className="btn btn-primary" onClick={() => void handleLoadRiskScores()} disabled={loading || !examId}>
+                  {loading ? <span className="spinner" aria-label="Loading" /> : <><Gauge size={14} /> Load risk scores</>}
+                </button>
                 {liveEvents.length > 0 ? (
-                  <span className="badge badge-orange">{liveEvents.length} events</span>
+                  <span className="badge badge-accent"><Radio size={12} /> {liveEvents.length} live events</span>
                 ) : null}
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  disabled={!examId || liveConnected}
-                  onClick={() => {
-                    if (!examId) return
-                    const token = localStorage.getItem("token") || ""
-                    const url = `${client.defaults.baseURL || ""}/api/risk/stream/${examId}?token=${encodeURIComponent(token)}`
-                    const es = new EventSource(url)
-                    es.addEventListener("stream_open", () => setLiveConnected(true))
-                    const handle = (kind: string) => (e: MessageEvent) => {
-                      try {
-                        const data = JSON.parse(e.data)
-                        setLiveEvents((prev) => [{ kind, user_id: data.user_id, timestamp: data.timestamp }, ...prev].slice(0, 50))
-                      } catch {/* drop malformed */}
-                    }
-                    ;["tab_event", "clipboard_event", "activity_event", "behavioral_event"].forEach((k) => {
-                      es.addEventListener(k, handle(k))
-                    })
-                    es.onerror = () => setLiveConnected(false)
-                    ;(window as unknown as { __examEs?: EventSource }).__examEs = es
-                  }}
-                >
-                  Start live stream
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  disabled={!liveConnected}
-                  onClick={() => {
-                    const w = window as unknown as { __examEs?: EventSource }
-                    w.__examEs?.close()
-                    delete w.__examEs
-                    setLiveConnected(false)
-                  }}
-                >
-                  Stop
-                </button>
-              </div>
+              <span className={`live-pill ${liveConnected ? "connected" : ""}`}>
+                <span className="live-dot" />
+                {liveConnected ? "Live · streaming" : "Connecting…"}
+              </span>
             </div>
-            <button type="button" className="btn btn-primary" onClick={() => void handleLoadRiskScores()} disabled={loading || !examId}>
-              {loading ? <span className="spinner" aria-label="Loading" /> : "Load Risk Scores"}
-            </button>
 
             {riskData.length === 0 ? (
-              <p className="muted">
-                {examId
-                  ? "No risk scores yet — click \"Load Risk Scores\" once the exam is SUBMITTED."
-                  : "Pick an exam first."}
-              </p>
-            ) : (
-              <div className="table-wrap">
-                <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 8 }}>
-                  <span className="badge badge-red">HIGH {riskData.filter((r) => r.risk_level === "HIGH").length}</span>
-                  <span className="badge badge-orange">MEDIUM {riskData.filter((r) => r.risk_level === "MEDIUM").length}</span>
-                  <span className="badge badge-green">LOW {riskData.filter((r) => r.risk_level === "LOW").length}</span>
+              <div className="empty">
+                <Gauge />
+                <div className="empty-title">No scores computed yet</div>
+                <div className="empty-body">
+                  {examId
+                    ? "Hit Load risk scores once the exam reaches SUBMITTED — Module 17 will aggregate the telemetry from every monitoring module."
+                    : "Pick an exam first, then we can score it."}
                 </div>
-                <table>
-                  <thead>
-                    <tr>
-                      {[
-                        { key: "username", label: "Student" },
-                        { key: "score", label: "Score" },
-                        { key: "risk_level", label: "Risk Level" },
-                      ].map((col) => (
-                        <th
-                          key={col.key}
-                          style={{ cursor: "pointer", userSelect: "none" }}
-                          onClick={() => setRiskSort((cur) => ({
-                            key: col.key as "score" | "risk_level" | "username",
-                            dir: cur.key === col.key && cur.dir === "desc" ? "asc" : "desc",
-                          }))}
-                        >
-                          {col.label}{riskSort.key === col.key ? (riskSort.dir === "desc" ? " ▼" : " ▲") : ""}
-                        </th>
-                      ))}
-                      <th>Tab Switches</th>
-                      <th>Fast Answers</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[...riskData]
-                      .sort((a, b) => {
-                        const mul = riskSort.dir === "desc" ? -1 : 1
-                        if (riskSort.key === "risk_level") {
-                          const order: Record<string, number> = { LOW: 0, MEDIUM: 1, HIGH: 2 }
-                          return mul * ((order[a.risk_level] ?? 0) - (order[b.risk_level] ?? 0))
-                        }
-                        if (riskSort.key === "score") return mul * (a.score - b.score)
-                        return mul * a.username.localeCompare(b.username)
-                      })
-                      .map((row) => (
-                        <tr key={`${row.student_id}-${row.computed_at}`}>
-                          <td>{row.username}</td>
-                          <td>{row.score}</td>
-                          <td><span className={`badge ${getStateBadgeClass(row.risk_level)}`}>{row.risk_level}</span></td>
-                          <td>{row.metrics.tab_switch_count ?? row.metrics.tab_switches ?? 0}</td>
-                          <td>{row.metrics.fast_answer_count ?? row.metrics.fast_answers ?? 0}</td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
+              </div>
+            ) : (
+              <div>
+                <div className="stats-grid">
+                  <div className="stat-card">
+                    <div className="stat-eyebrow">High risk</div>
+                    <div className="stat-value">{riskData.filter((r) => r.risk_level === "HIGH").length}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-eyebrow">Medium</div>
+                    <div className="stat-value">{riskData.filter((r) => r.risk_level === "MEDIUM").length}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-eyebrow">Low</div>
+                    <div className="stat-value">{riskData.filter((r) => r.risk_level === "LOW").length}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-eyebrow">Cohort avg.</div>
+                    <div className="stat-value">
+                      {(riskData.reduce((acc, r) => acc + r.score, 0) / riskData.length).toFixed(1)}
+                      <span className="stat-suffix">/10</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "16px 0 10px" }}>
+                  <h3>Students</h3>
+                  <span className="muted">Sorted by score</span>
+                </div>
+
+                <div className="risk-list">
+                  {[...riskData]
+                    .sort((a, b) => {
+                      const mul = riskSort.dir === "desc" ? -1 : 1
+                      if (riskSort.key === "risk_level") {
+                        const order: Record<string, number> = { LOW: 0, MEDIUM: 1, HIGH: 2 }
+                        return mul * ((order[a.risk_level] ?? 0) - (order[b.risk_level] ?? 0))
+                      }
+                      if (riskSort.key === "score") return mul * (a.score - b.score)
+                      return mul * a.username.localeCompare(b.username)
+                    })
+                    .map((row) => (
+                      <div key={`${row.student_id}-${row.computed_at}`} className={`risk-row ${row.risk_level.toLowerCase()}`}>
+                        <div className="risk-row-head">
+                          <span className="risk-row-name">{row.username || "Unknown"}</span>
+                          <span className="risk-row-id">{row.student_id.slice(-8)}</span>
+                          <span className={`badge ${getStateBadgeClass(row.risk_level)}`}>{row.risk_level}</span>
+                        </div>
+                        <div className="risk-row-score">
+                          <span className="num">{row.score.toFixed(1)}</span>
+                          <span className="muted">/10</span>
+                        </div>
+                        <div className="risk-row-bar">
+                          <div className="risk-row-bar-fill" style={{ width: `${Math.min(100, row.score * 10)}%` }} />
+                        </div>
+                        <div className="risk-row-metrics">
+                          <span className="risk-metric">
+                            <Eye />
+                            <span className="num">{row.metrics.tab_switch_count ?? row.metrics.tab_switches ?? 0}</span>
+                            <span className="label-inline">tab switches</span>
+                          </span>
+                          <span className="risk-metric">
+                            <Clipboard />
+                            <span className="num">{row.metrics.clipboard_paste_count ?? 0}</span>
+                            <span className="label-inline">pastes</span>
+                          </span>
+                          <span className="risk-metric">
+                            <Activity />
+                            <span className="num">{row.metrics.idle_time_seconds ?? 0}</span>
+                            <span className="label-inline">idle (s)</span>
+                          </span>
+                          <span className="risk-metric">
+                            <Zap />
+                            <span className="num">{row.metrics.fast_answer_count ?? row.metrics.fast_answers ?? 0}</span>
+                            <span className="label-inline">fast answers</span>
+                          </span>
+                          <span className="risk-metric">
+                            <Gauge />
+                            <span className="num">{(row.metrics.similarity_score ?? 0).toFixed?.(2) ?? row.metrics.similarity_score ?? 0}</span>
+                            <span className="label-inline">similarity</span>
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                </div>
               </div>
             )}
 
@@ -1381,26 +1635,38 @@ export default function Dashboard() {
             ) : null}
 
             {liveEvents.length > 0 ? (
-              <div className="table-wrap">
-                <h4 style={{ margin: "8px 0" }}>Live monitoring feed (last 50)</h4>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Kind</th>
-                      <th>Student</th>
-                      <th>When</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {liveEvents.map((ev, idx) => (
-                      <tr key={`${ev.kind}-${idx}`}>
-                        <td><span className="badge badge-orange">{ev.kind}</span></td>
-                        <td>{ev.user_id || "-"}</td>
-                        <td>{ev.timestamp ? formatLocalDateTime(ev.timestamp) : "-"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div>
+                <div className="live-feed-head">
+                  <h3>Live telemetry</h3>
+                  <span className="muted">Last 50 · newest first</span>
+                </div>
+                <div className="live-feed">
+                  {liveEvents.map((ev, idx) => {
+                    const iconMap: Record<string, typeof Eye> = {
+                      tab_event: Eye,
+                      clipboard_event: Clipboard,
+                      activity_event: Activity,
+                      behavioral_event: Zap,
+                    }
+                    const labelMap: Record<string, string> = {
+                      tab_event: "Tab switch",
+                      clipboard_event: "Clipboard event",
+                      activity_event: "Activity heartbeat",
+                      behavioral_event: "Behavioral signal",
+                    }
+                    const Icon = iconMap[ev.kind] || Activity
+                    return (
+                      <div key={`${ev.kind}-${idx}`} className={`live-event kind-${ev.kind}`}>
+                        <span className="live-event-icon"><Icon /></span>
+                        <div>
+                          <div className="live-event-title">{labelMap[ev.kind] || ev.kind}</div>
+                          <div className="live-event-meta">{ev.user_id ? `student ${ev.user_id.slice(-8)}` : "—"}</div>
+                        </div>
+                        <span className="live-event-time">{ev.timestamp ? formatLocalDateTime(ev.timestamp).split(" ").pop() : "—"}</span>
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             ) : null}
           </section>
@@ -1440,7 +1706,8 @@ export default function Dashboard() {
             </div>
           </section>
         ) : null}
-      </main>
+        </main>
+      </div>
 
       {/* Edit Exam Modal */}
       {editingExamId ? (
@@ -1474,13 +1741,19 @@ export default function Dashboard() {
             </div>
 
             <div className="field" style={{ marginBottom: 16 }}>
-              <label className="label">Exam Start Time</label>
-              <input className="input" type="datetime-local" value={editExamStartTime} onChange={(event) => setEditExamStartTime(event.target.value)} />
+              <label className="label">Exam date</label>
+              <input className="input" type="date" value={editExamDate} onChange={(event) => setEditExamDate(event.target.value)} />
             </div>
 
-            <div className="field" style={{ marginBottom: 16 }}>
-              <label className="label">Exam End Time</label>
-              <input className="input" type="datetime-local" value={editExamEndTime} onChange={(event) => setEditExamEndTime(event.target.value)} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label className="label">Starts at</label>
+                <input className="input" type="time" value={editExamStartTime} onChange={(event) => setEditExamStartTime(event.target.value)} />
+              </div>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label className="label">Ends at</label>
+                <input className="input" type="time" value={editExamEndTime} onChange={(event) => setEditExamEndTime(event.target.value)} />
+              </div>
             </div>
 
             <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>

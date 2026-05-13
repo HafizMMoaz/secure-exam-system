@@ -1,7 +1,7 @@
 from flask import Blueprint
 
 from middleware.jwt_auth import jwt_required, role_required
-from modules.risk.controller import compute, dashboard, student, health, stream
+from modules.risk.controller import compute, dashboard, student, health
 
 risk_bp = Blueprint("risk_bp", __name__)
 
@@ -82,32 +82,6 @@ def student_route(student_id):
         description: Forbidden
     """
     return student(student_id)
-
-
-@risk_bp.route("/stream/<exam_id>", methods=["GET"])
-@jwt_required
-@role_required("teacher")
-def stream_route(exam_id):
-    """
-    Server-Sent Events stream of monitoring events for an exam (§24 bonus).
-
-    Emits tab, clipboard, activity, and behavioral events as they land in
-    Mongo. Consume from the frontend via `new EventSource(url)`.
-    ---
-    tags:
-      - Risk
-    security:
-      - BearerAuth: []
-    parameters:
-      - in: path
-        name: exam_id
-        type: string
-        required: true
-    responses:
-      200:
-        description: SSE stream of monitoring events
-    """
-    return stream(exam_id)
 
 
 @risk_bp.route("/health", methods=["GET"])

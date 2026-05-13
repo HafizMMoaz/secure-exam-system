@@ -42,6 +42,29 @@ def on_subscribe(data):
     emit("subscribed", {"exam_id": exam_id})
 
 
+@socketio.on("subscribe_logs", namespace="/monitoring")
+def on_subscribe_logs(_data=None):
+    join_room("logs")
+    emit("logs_subscribed", {"ok": True})
+
+
+def emit_log_event(log_doc):
+    """
+    Push a freshly-written log doc to every WebSocket client subscribed to
+    the "logs" room. Called by Module 13's write_log after insert so the
+    teacher audit-logs UI updates in real time.
+    """
+    try:
+        socketio.emit(
+            "log_event",
+            log_doc,
+            to="logs",
+            namespace="/monitoring",
+        )
+    except Exception:
+        pass
+
+
 def emit_monitoring_event(exam_id, kind, payload):
     """
     Push a monitoring event to every WebSocket client subscribed to the
