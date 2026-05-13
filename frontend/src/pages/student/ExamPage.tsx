@@ -403,11 +403,15 @@ export default function ExamPage() {
 
         const nextState = response.data.data.state
         setExamState(nextState)
-        if (nextState === "TEACHER_APPROVED") {
+        // Activation is a per-student gate, not a per-exam one. Every
+        // state past TEACHER_APPROVED still requires THIS student to
+        // enter the activation code before they can take the exam.
+        if (
+          nextState === "TEACHER_APPROVED" ||
+          nextState === "ACTIVATION_VALID" ||
+          nextState === "IN_PROGRESS"
+        ) {
           setStep("ACTIVATION")
-        } else if (nextState === "IN_PROGRESS") {
-          setResumeMessage("Resuming your exam session...")
-          setStep("RANDOMIZATION")
         }
       } catch (waitingError) {
         if (!cancelled) {

@@ -92,6 +92,7 @@ export interface LogEntry {
   module: string
   level: string
   user_id: string
+  username?: string
   exam_id: string
   action: string
   details: Record<string, unknown>

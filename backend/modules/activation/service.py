@@ -194,12 +194,27 @@ def validate_activation_code(user_context, payload):
         raise BadRequestException("Activation code has expired")
 
     try:
-        # Don't mark as used - allow multiple students to use same code
-        # Just update the exam state to ACTIVATION_VALID
-        exams_col.update_one(
-            {"_id": ObjectId(exam_id)},
-            {"$set": {"state": ExamState.ACTIVATION_VALID.value}},
-        )
+        # Allow multiple students to use the same code.
+        # Only transition the exam state TEACHER_APPROVED -> ACTIVATION_VALID.
+        # Once a later student has started (state == IN_PROGRESS or beyond),
+        # do NOT regress the state machine — but still accept this student's
+        # activation so they can join the in-progress exam.
+        exam_doc = exams_col.find_one({"_id": ObjectId(exam_id)})
+        if not exam_doc:
+            raise ExamNotFoundException()
+        if exam_doc.get("state") == ExamState.TEACHER_APPROVED.value:
+            exams_col.update_one(
+                {"_id": ObjectId(exam_id)},
+                {"$set": {"state": ExamState.ACTIVATION_VALID.value}},
+            )
+        # Mark this student as activated on their enrolled_students entry
+        # so the frontend can detect per-student activation status.
+        student_user_id = (user_context or {}).get("user_id")
+        if student_user_id:
+            exams_col.update_one(
+                {"_id": ObjectId(exam_id), "students.student_id": student_user_id},
+                {"$set": {"students.$.activated_at": now()}},
+            )
     except (InvalidId, TypeError):
         raise ExamNotFoundException()
     except PyMongoError as exc:

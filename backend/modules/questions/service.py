@@ -875,22 +875,40 @@ def get_exam_students(user_context, exam_id):
         raise BadRequestException("exam_id is required")
 
     exam = _get_exam(str(exam_id).strip())
-    
+
     if not _is_teacher_exam_owner(user_context, exam):
         raise ForbiddenException("You are not allowed to view students for this exam")
 
     students = exam.get("students", []) or []
+
+    # Resolve student_id -> username in one batched query so the UI shows
+    # human names instead of leaking internal Mongo identifiers.
+    from config.config import users_col
+    student_ids = [s.get("student_id") for s in students if s.get("student_id")]
+    object_ids = []
+    for sid in student_ids:
+        try:
+            object_ids.append(ObjectId(sid))
+        except Exception:
+            pass
+    username_map = {}
+    if object_ids:
+        for user_doc in users_col.find({"_id": {"$in": object_ids}}, {"username": 1}):
+            username_map[str(user_doc["_id"])] = user_doc.get("username", "")
+
     result = []
-    
     for student in students:
+        sid = student.get("student_id")
         result.append({
-            "student_id": student.get("student_id"),
+            "student_id": sid,
+            "username": username_map.get(sid, "—"),
             "joined_at": _serialize_dt(student.get("joined_at")),
             "approved": student.get("approved", False),
             "approved_at": _serialize_dt(student.get("approved_at")),
             "approved_by": student.get("approved_by"),
+            "activated_at": _serialize_dt(student.get("activated_at")),
         })
-    
+
     return {"exam_id": exam_id, "students": result, "count": len(result)}
 
 

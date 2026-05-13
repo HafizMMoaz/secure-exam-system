@@ -71,15 +71,28 @@ def emit_monitoring_event(exam_id, kind, payload):
     given exam's room. Called from Modules 10/11/12/15 after they record
     an event to their own collection.
 
+    Resolves user_id → username so the UI never has to display a raw id.
+
     Safe to call even when there are no subscribers — the emit is a
     no-op in that case.
     """
     if not exam_id:
         return
     try:
+        enriched = dict(payload or {})
+        uid = enriched.get("user_id")
+        if uid and "username" not in enriched:
+            try:
+                from bson import ObjectId
+                from config.config import users_col
+                udoc = users_col.find_one({"_id": ObjectId(uid)}, {"username": 1})
+                if udoc:
+                    enriched["username"] = udoc.get("username", "")
+            except Exception:
+                pass
         socketio.emit(
             kind,
-            payload or {},
+            enriched,
             to=f"exam:{exam_id}",
             namespace="/monitoring",
         )

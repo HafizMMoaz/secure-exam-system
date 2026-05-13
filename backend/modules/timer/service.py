@@ -149,8 +149,8 @@ def status(user_context, exam_id):
     if not session:
         raise ExamStateException("Exam not started")
 
-    end_time = session.get("end_time")
-    remaining_seconds = int((end_time - now()).total_seconds())
+    end_time = _normalize_dt(session.get("end_time"))
+    remaining_seconds = int((end_time - now()).total_seconds()) if end_time else 0
 
     if remaining_seconds <= 0:
         # expire the session if still active
@@ -186,8 +186,9 @@ def submit_exam(user_context, payload, auth_header=""):
     if not session:
         raise ExamStateException("Exam not started")
 
-    end_time = session.get("end_time")
-    if now() > end_time:
+    end_time = _normalize_dt(session.get("end_time"))
+    current = now()
+    if end_time and current > end_time:
         raise ExamStateException("Exam time has expired")
 
     if session.get("submitted_at") is not None:

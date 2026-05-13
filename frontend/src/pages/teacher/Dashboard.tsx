@@ -182,7 +182,7 @@ export default function Dashboard() {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [riskData, setRiskData] = useState<RiskScore[]>([])
   const [students, setStudents] = useState<StudentUser[]>([])
-  const [liveEvents, setLiveEvents] = useState<Array<{ kind: string; user_id?: string; timestamp?: string }>>([])
+  const [liveEvents, setLiveEvents] = useState<Array<{ kind: string; user_id?: string; username?: string; timestamp?: string }>>([])
   const [liveConnected, setLiveConnected] = useState(false)
   const [logsLive, setLogsLive] = useState(false)
   const logsSocketRef = useRef<Socket | null>(null)
@@ -217,7 +217,7 @@ export default function Dashboard() {
   const [deletingQuestionId, setDeletingQuestionId] = useState("")
   
   // Student approval state
-  const [examStudents, setExamStudents] = useState<Array<{ student_id: string; joined_at: string; approved: boolean; approved_at: string | null; approved_by: string | null }>>([])
+  const [examStudents, setExamStudents] = useState<Array<{ student_id: string; username?: string; joined_at: string; approved: boolean; approved_at: string | null; approved_by: string | null; activated_at?: string | null }>>([])
   const [approvingStudentId, setApprovingStudentId] = useState("")
 
   const highRiskCount = riskData.filter((item) => item.risk_level === "HIGH").length
@@ -941,8 +941,8 @@ export default function Dashboard() {
     socket.on("subscribed", () => setLiveConnected(true))
     socket.on("disconnect", () => setLiveConnected(false))
 
-    const onEvent = (kind: string) => (data: { user_id?: string; timestamp?: string }) => {
-      setLiveEvents((prev) => [{ kind, user_id: data.user_id, timestamp: data.timestamp }, ...prev].slice(0, 50))
+    const onEvent = (kind: string) => (data: { user_id?: string; username?: string; timestamp?: string }) => {
+      setLiveEvents((prev) => [{ kind, user_id: data.user_id, username: data.username, timestamp: data.timestamp }, ...prev].slice(0, 50))
     }
     socket.on("tab_event", onEvent("tab_event"))
     socket.on("clipboard_event", onEvent("clipboard_event"))
@@ -1124,10 +1124,6 @@ export default function Dashboard() {
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div className="field">
-                  <label className="label">Duration (minutes)</label>
-                  <input className="input" type="number" value={newExamDuration} onChange={(event) => setNewExamDuration(Number.parseInt(event.target.value || "0", 10) || 0)} />
-                </div>
-                <div className="field">
                   <label className="label">Max students</label>
                   <input
                     className="input"
@@ -1139,14 +1135,17 @@ export default function Dashboard() {
                     placeholder="30"
                   />
                 </div>
+                <div className="field">
+                  <label className="label">Exam date</label>
+                  <input className="input" type="date" value={newExamDate} onChange={(event) => setNewExamDate(event.target.value)} />
+                </div>
               </div>
 
-              <div className="field">
-                <label className="label">Exam date</label>
-                <input className="input" type="date" value={newExamDate} onChange={(event) => setNewExamDate(event.target.value)} />
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                <div className="field">
+                  <label className="label">Duration (min)</label>
+                  <input className="input" type="number" value={newExamDuration} onChange={(event) => setNewExamDuration(Number.parseInt(event.target.value || "0", 10) || 0)} />
+                </div>
                 <div className="field">
                   <label className="label">Starts at</label>
                   <input className="input" type="time" value={newExamStartTime} onChange={(event) => setNewExamStartTime(event.target.value)} />
@@ -1348,8 +1347,9 @@ export default function Dashboard() {
                     <table>
                       <thead>
                         <tr>
-                          <th>Student ID</th>
-                          <th>Joined At</th>
+                          <th>Student</th>
+                          <th>Joined</th>
+                          <th>Activated</th>
                           <th>Status</th>
                           <th>Action</th>
                         </tr>
@@ -1357,8 +1357,9 @@ export default function Dashboard() {
                       <tbody>
                         {examStudents.map((student) => (
                           <tr key={student.student_id}>
-                            <td>{student.student_id}</td>
+                            <td>{student.username || "—"}</td>
                             <td>{formatLocalDateTime(student.joined_at)}</td>
+                            <td>{student.activated_at ? formatLocalDateTime(student.activated_at) : <span className="muted">—</span>}</td>
                             <td>
                               <span className={`badge ${student.approved ? "badge-green" : "badge-zinc"}`}>
                                 {student.approved ? "Approved" : "Pending"}
@@ -1550,7 +1551,7 @@ export default function Dashboard() {
                         <td className="mono" style={{ color: "var(--ink-3)", whiteSpace: "nowrap" }}>
                           {entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : "—"}
                         </td>
-                        <td>{entry.user_id || "system"}</td>
+                        <td>{entry.username || (entry.user_id ? "—" : "system")}</td>
                         <td>{humanizeAction(entry.action)}</td>
                         <td><span className={`badge ${getStateBadgeClass(entry.level)}`}>{entry.level}</span></td>
                       </tr>
@@ -1625,7 +1626,6 @@ export default function Dashboard() {
                       <div key={`${row.student_id}-${row.computed_at}`} className={`risk-row ${row.risk_level.toLowerCase()}`}>
                         <div className="risk-row-head">
                           <span className="risk-row-name">{row.username || "Unknown"}</span>
-                          <span className="risk-row-id">{row.student_id.slice(-8)}</span>
                           <span className={`badge ${getStateBadgeClass(row.risk_level)}`}>{row.risk_level}</span>
                         </div>
                         <div className="risk-row-score">
@@ -1698,7 +1698,7 @@ export default function Dashboard() {
                         <span className="live-event-icon"><Icon /></span>
                         <div>
                           <div className="live-event-title">{labelMap[ev.kind] || ev.kind}</div>
-                          <div className="live-event-meta">{ev.user_id ? `student ${ev.user_id.slice(-8)}` : "—"}</div>
+                          <div className="live-event-meta">{ev.username || (ev.user_id ? "—" : "")}</div>
                         </div>
                         <span className="live-event-time">{ev.timestamp ? formatLocalDateTime(ev.timestamp).split(" ").pop() : "—"}</span>
                       </div>
@@ -1770,21 +1770,20 @@ export default function Dashboard() {
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
               <div className="field" style={{ marginBottom: 0 }}>
-                <label className="label">Duration (minutes)</label>
-                <input className="input" type="number" value={editExamDuration} onChange={(event) => setEditExamDuration(Number.parseInt(event.target.value || "0", 10) || 0)} />
-              </div>
-              <div className="field" style={{ marginBottom: 0 }}>
                 <label className="label">Max students</label>
                 <input className="input" type="number" min={1} max={200} value={editExamMaxStudents} onChange={(event) => setEditExamMaxStudents(Number.parseInt(event.target.value || "0", 10) || 0)} />
               </div>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label className="label">Exam date</label>
+                <input className="input" type="date" value={editExamDate} onChange={(event) => setEditExamDate(event.target.value)} />
+              </div>
             </div>
 
-            <div className="field" style={{ marginBottom: 16 }}>
-              <label className="label">Exam date</label>
-              <input className="input" type="date" value={editExamDate} onChange={(event) => setEditExamDate(event.target.value)} />
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label className="label">Duration (min)</label>
+                <input className="input" type="number" value={editExamDuration} onChange={(event) => setEditExamDuration(Number.parseInt(event.target.value || "0", 10) || 0)} />
+              </div>
               <div className="field" style={{ marginBottom: 0 }}>
                 <label className="label">Starts at</label>
                 <input className="input" type="time" value={editExamStartTime} onChange={(event) => setEditExamStartTime(event.target.value)} />

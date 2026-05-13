@@ -78,11 +78,21 @@ def write_log(payload):
     # teacher audit-log UI updates in real time without polling.
     try:
         from middleware.socketio_app import emit_log_event
+        from config.config import users_col
+        username = ""
+        if user_id:
+            try:
+                udoc = users_col.find_one({"_id": ObjectId(user_id)}, {"username": 1})
+                if udoc:
+                    username = udoc.get("username", "")
+            except Exception:
+                pass
         ws_doc = {
             "log_id": str(result.inserted_id),
             "module": module,
             "level": level,
             "user_id": user_id,
+            "username": username or ("system" if not user_id else ""),
             "exam_id": exam_id or "",
             "action": action,
             "details": details,
@@ -210,25 +220,42 @@ def list_logs(filters):
         query["module"] = filters.get("module")
 
     try:
-        cursor = logs_col.find(query).sort("received_at", -1)
-        items = []
-        for log in cursor:
-            items.append({
-                "log_id": str(log.get("_id")),
-                "module": log.get("module"),
-                "level": log.get("level"),
-                "user_id": log.get("user_id"),
-                "exam_id": log.get("exam_id") or "",
-                "action": log.get("action"),
-                "details": log.get("details") or {},
-                "timestamp": log.get("timestamp"),
-                "integrity_hash": log.get("integrity_hash"),
-                "received_at": _serialize_dt(log.get("received_at")),
-            })
-
-        return {"logs": items, "count": len(items)}
+        cursor = list(logs_col.find(query).sort("received_at", -1))
     except PyMongoError as exc:
         raise DatabaseException(str(exc))
+
+    # Batched username resolution so the UI never has to display raw IDs.
+    from config.config import users_col
+    unique_ids = {log.get("user_id") for log in cursor if log.get("user_id")}
+    object_ids = []
+    for uid in unique_ids:
+        try:
+            object_ids.append(ObjectId(uid))
+        except Exception:
+            pass
+    username_map = {}
+    if object_ids:
+        for udoc in users_col.find({"_id": {"$in": object_ids}}, {"username": 1}):
+            username_map[str(udoc["_id"])] = udoc.get("username", "")
+
+    items = []
+    for log in cursor:
+        uid = log.get("user_id") or ""
+        items.append({
+            "log_id": str(log.get("_id")),
+            "module": log.get("module"),
+            "level": log.get("level"),
+            "user_id": uid,
+            "username": username_map.get(uid, "system" if not uid else ""),
+            "exam_id": log.get("exam_id") or "",
+            "action": log.get("action"),
+            "details": log.get("details") or {},
+            "timestamp": log.get("timestamp"),
+            "integrity_hash": log.get("integrity_hash"),
+            "received_at": _serialize_dt(log.get("received_at")),
+        })
+
+    return {"logs": items, "count": len(items)}
 
 
 def get_health():
