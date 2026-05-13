@@ -258,11 +258,13 @@ def test_websocket_monitoring_round_trip(base_url, db):
         "is_active": True,
     })
     import jwt as _jwt
+    import os as _os
+    jwt_secret = _os.environ.get("JWT_SECRET", "ci_test_secret_change_me")
     token = _jwt.encode({
         "user_id": str(student_id), "username": "ws_student", "role": "student",
         "session_id": "ws_sess", "device_fingerprint_hash": "fp",
         "exp": int(time.time()) + 600,
-    }, "test_secret_for_smoke_only_do_not_use_in_prod", algorithm="HS256")
+    }, jwt_secret, algorithm="HS256")
 
     r = requests.post(
         f"{base_url}/api/tab/event",

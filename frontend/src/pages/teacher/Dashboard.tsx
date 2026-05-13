@@ -164,7 +164,6 @@ export default function Dashboard() {
   const [logsLive, setLogsLive] = useState(false)
   const logsSocketRef = useRef<Socket | null>(null)
   const riskSocketRef = useRef<Socket | null>(null)
-  const [riskSort, setRiskSort] = useState<{ key: "score" | "risk_level" | "username"; dir: "asc" | "desc" }>({ key: "score", dir: "desc" })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
@@ -1574,15 +1573,7 @@ export default function Dashboard() {
 
                 <div className="risk-list">
                   {[...riskData]
-                    .sort((a, b) => {
-                      const mul = riskSort.dir === "desc" ? -1 : 1
-                      if (riskSort.key === "risk_level") {
-                        const order: Record<string, number> = { LOW: 0, MEDIUM: 1, HIGH: 2 }
-                        return mul * ((order[a.risk_level] ?? 0) - (order[b.risk_level] ?? 0))
-                      }
-                      if (riskSort.key === "score") return mul * (a.score - b.score)
-                      return mul * a.username.localeCompare(b.username)
-                    })
+                    .sort((a, b) => b.score - a.score)
                     .map((row) => (
                       <div key={`${row.student_id}-${row.computed_at}`} className={`risk-row ${row.risk_level.toLowerCase()}`}>
                         <div className="risk-row-head">
