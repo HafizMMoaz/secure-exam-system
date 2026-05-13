@@ -47,7 +47,10 @@ def _get_depth(obj, current=0):
 
 def _iter_values(obj):
     if isinstance(obj, dict):
-        for value in obj.values():
+        for key, value in obj.items():
+            # Scan keys too — Mongo operator injection ({"$ne": null}) lives
+            # in the key, not the value, so a value-only scan misses it.
+            yield key
             yield from _iter_values(value)
     elif isinstance(obj, list):
         for item in obj:
@@ -157,3 +160,7 @@ def _send_security_log(user_id, violations):
 
 def log_validation_failure(user_id, violations):
     _send_security_log(user_id, violations)
+
+
+def get_health():
+    return {"module_name": ModuleName.VALIDATION.value, "dependencies": [], "version": "1.0.0", "healthy": True}

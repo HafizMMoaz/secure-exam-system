@@ -1,73 +1,47 @@
-# React + TypeScript + Vite
+# Frontend — Secure Online Examination System
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + TypeScript + Vite client for the Secure Online Examination System.
+Two top-level flows: student exam-taking and teacher dashboard.
 
-Currently, two official plugins are available:
+## Run
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev          # Vite dev server, default http://localhost:5173
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+The backend must be reachable at the URL configured in `src/api/client.ts`
+(default `http://localhost:5500`). Start the backend first — see top-level
+`installation.md`.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Build & verify
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run lint
+npm run build        # production bundle into dist/
+npm run preview      # serve the built bundle locally
 ```
+
+## Layout
+
+- `src/api/client.ts` — axios instance, JWT injection interceptor, base URL.
+- `src/context/AuthContext.tsx` — login state, token persistence, role.
+- `src/components/ProtectedRoute.tsx` — role-gated route wrapper.
+- `src/pages/student/ExamPage.tsx` — student state machine (device registration
+  → enrollment → activation → randomization → in-progress → submit).
+- `src/pages/teacher/Dashboard.tsx` — exam CRUD, approvals, monitoring logs,
+  risk dashboard.
+- `src/hooks/useDeviceFingerprint.ts` — emits device fingerprint hash that the
+  backend binds to the session JWT.
+- `src/hooks/useExamMonitoring.ts` — heartbeat + tab/clipboard/activity
+  event posters during `IN_PROGRESS`.
+
+## Contract with the backend
+
+This client follows the PRD §27 integration contract:
+- Authorization header: `Bearer <jwt>` issued by Module 1 (Auth).
+- Risk dashboard reads `data.students` (PRD §27.7 shape) with `scores` fallback.
+- Metric keys: `tab_switch_count`, `fast_answer_count`, `idle_time_seconds`,
+  `clipboard_paste_count`, `multi_session_attempts`, `similarity_score`.
+
+See top-level `ARCHITECTURE.md` for the full module map.

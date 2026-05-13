@@ -1,3 +1,8 @@
+# §27.6 (strict): Module 6 owns exam content fields (title, duration, totals,
+# enrollment list), all question CRUD, and response writes (`answer_text`,
+# `time_taken_seconds`, edit counts). State-field writes go to Module 1 via
+# `PUT /api/auth/exam/state/<id>` through middleware/state_client.py.
+# Full rationale: ARCHITECTURE.md.
 import hashlib
 import json
 import requests
@@ -6,7 +11,8 @@ from bson import ObjectId
 from pymongo.errors import PyMongoError
 from pytz import utc
 
-from config.config import questions_col, exams_col, responses_col, BASE_URL, now
+from config.config import questions_col, exams_col, responses_col, devices_col, BASE_URL, now
+from middleware.state_client import transition_exam_state
 from enums.module_name import ModuleName
 from enums.log_level import LogLevel
 from enums.exam_state import ExamState
@@ -219,7 +225,7 @@ def get_exam_public(exam_id):
     }
 
 
-def approve_exam(user_context, payload):
+def approve_exam(user_context, payload, auth_header=""):
     exam_id = (payload or {}).get("exam_id")
     if not exam_id:
         raise BadRequestException("exam_id is required")
@@ -237,20 +243,30 @@ def approve_exam(user_context, payload):
     if count == 0:
         raise BadRequestException("Cannot approve exam with no questions. Add at least one question first.")
 
-    try:
-        exams_col.update_one(
-            {"_id": exam.get("_id")},
-            {"$set": {"state": ExamState.TEACHER_APPROVED.value}},
+    # §27.6 (strict): state transitions routed through Module 1.
+    # If the exam was created and never advanced, traverse the missing
+    # DEVICE_VERIFIED step first — teacher approval is the moment the
+    # teacher attests that students will be device-verified at exam time.
+    if current_state == ExamState.NOT_STARTED.value:
+        transition_exam_state(
+            str(exam.get("_id")),
+            ExamState.DEVICE_VERIFIED.value,
+            auth_header,
+            ModuleName.QUESTIONS.value,
         )
-    except PyMongoError as exc:
-        raise DatabaseException(str(exc))
+    transition_exam_state(
+        str(exam.get("_id")),
+        ExamState.TEACHER_APPROVED.value,
+        auth_header,
+        ModuleName.QUESTIONS.value,
+    )
 
     _send_log(LogLevel.INFO.value, (user_context or {}).get("user_id"), "exam_approved", {"exam_id": str(exam.get("_id"))})
 
     return {"exam_id": str(exam.get("_id")), "state": ExamState.TEACHER_APPROVED.value}
 
 
-def enroll_student(user_context, exam_id):
+def enroll_student(user_context, exam_id, auth_header=""):
     if not exam_id:
         raise BadRequestException("exam_id is required")
 
@@ -512,7 +528,7 @@ def save_answer(user_context, payload):
             },
             {
                 "$set": {
-                    "answer": answer,
+                    "answer_text": answer,
                     "time_taken_seconds": time_taken_seconds,
                     "updated_at": now(),
                 },
@@ -542,7 +558,7 @@ def get_student_answers(user_context, exam_id):
         cursor = responses_col.find({"exam_id": exam_id, "student_id": student_id})
         answers = {}
         for response in cursor:
-            answers[str(response.get("question_id"))] = response.get("answer", "")
+            answers[str(response.get("question_id"))] = response.get("answer_text", response.get("answer", ""))
     except PyMongoError as exc:
         raise DatabaseException(str(exc))
 

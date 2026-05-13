@@ -52,7 +52,8 @@ def get_exam_route(exam_id):
 def approve_exam_route():
     user_context = getattr(request, "user", {})
     payload = request.get_json(silent=True) or {}
-    data = approve_exam(user_context, payload)
+    auth_header = request.headers.get("Authorization", "")
+    data = approve_exam(user_context, payload, auth_header)
     return success_response(data=data)
 
 
@@ -62,7 +63,8 @@ def enroll_student_route():
     exam_id = payload.get("exam_id")
     if not exam_id:
         raise BadRequestException("exam_id is required")
-    data = enroll_student(user_context, exam_id)
+    auth_header = request.headers.get("Authorization", "")
+    data = enroll_student(user_context, exam_id, auth_header)
     return success_response(data=data)
 
 

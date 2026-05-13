@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react"
 import { useNavigate } from "react-router-dom"
 import axios from "axios"
+import { ShieldCheck } from "lucide-react"
 import client from "../api/client"
 
 function getErrorMessage(error: unknown) {
@@ -10,7 +11,6 @@ function getErrorMessage(error: unknown) {
       return responseMessage
     }
   }
-
   return "Registration failed"
 }
 
@@ -20,24 +20,22 @@ export default function Register() {
   const [password, setPassword] = useState("")
   const [role, setRole] = useState<"student" | "teacher">("student")
   const [error, setError] = useState("")
-  const [success, setSuccess] = useState("")
   const [loading, setLoading] = useState(false)
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setError("")
-    setSuccess("")
     setLoading(true)
-
     try {
       await client.post("/api/auth/register", {
         username: username.trim(),
         password,
         role,
       })
-
-      setSuccess("Registration successful. Please log in.")
-      navigate("/login", { replace: true, state: { message: "Registration successful. Please log in." } })
+      navigate("/login", {
+        replace: true,
+        state: { message: "Account created. Sign in to continue." },
+      })
     } catch (registerError: unknown) {
       setError(getErrorMessage(registerError))
     } finally {
@@ -47,14 +45,20 @@ export default function Register() {
 
   return (
     <div className="auth-shell">
-      <div className="auth-box">
-        <h1>Create account</h1>
-        <p className="muted">Secure Online Examination System</p>
+      <div className="auth-form">
+        <div className="auth-logo">
+          <span className="auth-logo-mark">
+            <ShieldCheck size={14} />
+          </span>
+          Secure Exam
+        </div>
 
-        {success ? <div className="alert alert-success">{success}</div> : null}
+        <h1>Create account</h1>
+        <p className="auth-sub">Sign up to get started.</p>
+
         {error ? <div className="alert alert-error">{error}</div> : null}
 
-        <form onSubmit={handleSubmit} className="card">
+        <form onSubmit={handleSubmit}>
           <label className="field">
             <span className="label">Username</span>
             <input
@@ -64,7 +68,7 @@ export default function Register() {
               onChange={(event) => setUsername(event.target.value)}
               required
               autoComplete="username"
-              placeholder="Choose a username"
+              autoFocus
             />
           </label>
 
@@ -77,26 +81,38 @@ export default function Register() {
               onChange={(event) => setPassword(event.target.value)}
               required
               autoComplete="new-password"
-              placeholder="Create a password"
             />
           </label>
 
-          <label className="field">
-            <span className="label">Role</span>
-            <select className="select" value={role} onChange={(event) => setRole(event.target.value as "student" | "teacher")}>
-              <option value="student">student</option>
-              <option value="teacher">teacher</option>
-            </select>
-          </label>
+          <div className="field">
+            <span className="label">I am a</span>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+              <button
+                type="button"
+                className={`btn ${role === "student" ? "btn-primary" : "btn-ghost"}`}
+                onClick={() => setRole("student")}
+              >
+                Student
+              </button>
+              <button
+                type="button"
+                className={`btn ${role === "teacher" ? "btn-primary" : "btn-ghost"}`}
+                onClick={() => setRole("teacher")}
+              >
+                Teacher
+              </button>
+            </div>
+          </div>
 
           <button type="submit" className="btn btn-primary btn-full" disabled={loading}>
-            {loading ? <span className="spinner" aria-label="Loading" /> : "Register"}
+            {loading ? <span className="spinner" aria-label="Loading" /> : "Create account"}
           </button>
         </form>
 
-        <p className="auth-footer">
-          Already have an account? <a href="/login">Back to login</a>
-        </p>
+        <div className="auth-meta-row">
+          <span>Already have an account?</span>
+          <a href="/login">Sign in</a>
+        </div>
       </div>
     </div>
   )

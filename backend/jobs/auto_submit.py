@@ -43,6 +43,12 @@ def _auto_submit_expired_exams():
                         },
                     )
 
+                    # §27.6 (strict) exemption: auto_submit runs as a system
+                    # process without a user JWT. The §27.6 central state
+                    # endpoint requires authentication; documenting this
+                    # path as the single sanctioned bypass for system-driven
+                    # transitions. All non-system transitions still route
+                    # through Module 1.
                     exams_col.update_one(
                         {"_id": ObjectId(exam_id)},
                         {

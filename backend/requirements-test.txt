@@ -1,0 +1,3 @@
+pytest>=8.0
+python-socketio[client]>=5.10
+websocket-client>=1.7

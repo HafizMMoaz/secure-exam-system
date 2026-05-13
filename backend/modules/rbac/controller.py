@@ -31,7 +31,8 @@ def users():
 
 def toggle(user_id):
     user_context = getattr(request, "user", {})
-    data = toggle_user_status(user_id, actor_user_id=user_context.get("user_id"))
+    auth_header = request.headers.get("Authorization", "")
+    data = toggle_user_status(user_id, actor_user_id=user_context.get("user_id"), auth_header=auth_header)
     return success_response(data=data)
 
 

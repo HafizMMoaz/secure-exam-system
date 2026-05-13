@@ -77,7 +77,7 @@ Notes:
 All exam-related actions must respect the canonical state machine:
 
 ```
-NOT_STARTED -> DEVICE_VERIFIED -> TEACHER_APPROVED -> ACTIVITY_VALID -> IN_PROGRESS -> SUBMITTED -> ANALYZING -> COMPLETED
+NOT_STARTED -> DEVICE_VERIFIED -> TEACHER_APPROVED -> ACTIVATION_VALID -> IN_PROGRESS -> SUBMITTED -> ANALYZING -> COMPLETED
 ```
 
 Enforce allowed transitions and return 409 for invalid state actions.

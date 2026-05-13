@@ -44,10 +44,15 @@ def jwt_required(f):
     def decorated(*args, **kwargs):
         auth_header = request.headers.get("Authorization", "")
 
-        if not auth_header.startswith("Bearer "):
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+        elif request.args.get("token"):
+            # EventSource cannot set custom headers — accept JWT via ?token=
+            # query parameter for SSE endpoints. Only enabled because the
+            # endpoints that use SSE are read-only and idempotent.
+            token = request.args.get("token")
+        else:
             raise JWTMissingException()
-
-        token = auth_header.split(" ")[1]
 
         try:
             payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])

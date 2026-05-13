@@ -28,7 +28,10 @@ pip install -r requirements.txt
 4. Create `backend/.env` or `cp backend/.env.example backend/.env` if it does not already exist and set values:
 
 ```env
+BASE_URL=http://localhost:5500
+PORT=5500
 FLASK_ENV=development
+TIMEZONE=Asia/Karachi
 MONGO_URI=mongodb://localhost:27017/exam_security
 JWT_SECRET=your_super_secret_key_change_this
 JWT_EXPIRY_MINUTES=60
@@ -50,9 +53,9 @@ python backend/tools/generate_jwt_secret.py --bytes 32 --format urlsafe
 
 Copy the printed value into the `JWT_SECRET` field in `backend/.env`.
 
-- API base: `http://127.0.0.1:5000`
-- Swagger docs: `http://127.0.0.1:5000/api/docs`
-- Health check: `http://127.0.0.1:5000/api/health`
+- API base: `http://127.0.0.1:5500`
+- Swagger docs: `http://127.0.0.1:5500/api/docs`
+- Health check: `http://127.0.0.1:5500/api/health`
 
 ## Frontend Setup
 

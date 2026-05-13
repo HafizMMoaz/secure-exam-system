@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import axios from "axios"
 import { useNavigate } from "react-router-dom"
+import {
+  ShieldCheck,
+  LogOut,
+  Send,
+  Map as MapIcon,
+} from "lucide-react"
 import client from "../../api/client"
 import { useAuth } from "../../hooks/useAuth"
 import { getDeviceSignals, useDeviceFingerprint } from "../../hooks/useDeviceFingerprint"
@@ -76,27 +82,79 @@ function getRemainingSeconds(value: string, referenceTime: number) {
   return Math.max(0, Math.ceil((time - referenceTime) / 1000))
 }
 
+const STEP_ORDER: ExamStep[] = [
+  "DEVICE_REGISTRATION",
+  "EXAM_SELECTION",
+  "EXAM_WAITING",
+  "ACTIVATION",
+  "RANDOMIZATION",
+  "IN_PROGRESS",
+  "SUBMITTED",
+]
+
+const STEP_LABELS: Record<ExamStep, string> = {
+  DEVICE_REGISTRATION: "Device",
+  EXAM_SELECTION: "Pick exam",
+  EXAM_WAITING: "Lobby",
+  ACTIVATION: "Activate",
+  RANDOMIZATION: "Shuffle",
+  IN_PROGRESS: "Sit",
+  SUBMITTED: "Submitted",
+}
+
+function StepIndicator({ currentStep }: { currentStep: ExamStep }) {
+  const currentIndex = STEP_ORDER.indexOf(currentStep)
+  return (
+    <div className="exam-progress">
+      {STEP_ORDER.map((step, idx) => {
+        const status = idx < currentIndex ? "done" : idx === currentIndex ? "current" : ""
+        return (
+          <span key={step} className={`exam-step ${status}`}>
+            <span className={`exam-step-dot ${status}`}>
+              {idx < currentIndex ? "✓" : idx + 1}
+            </span>
+            <span className="exam-step-label">{STEP_LABELS[step]}</span>
+            {idx < STEP_ORDER.length - 1 ? (
+              <span className={`exam-step-rule ${idx < currentIndex ? "done" : ""}`} />
+            ) : null}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
 function StudentChrome({
   user,
+  currentStep,
   onLogout,
+  showStepIndicator = true,
   children,
 }: {
   user: { username: string; role: string } | null
+  currentStep: ExamStep
   onLogout: () => void
+  showStepIndicator?: boolean
   children: React.ReactNode
 }) {
   return (
-    <div>
-      <header className="navbar">
-        <div className="navbar-brand">SecureExam</div>
-        <div className="navbar-right">
-          <span>{user?.username || "Unknown"}</span>
+    <div className="exam-shell">
+      <header className="topbar">
+        <div className="topbar-brand">
+          <span className="topbar-brand-mark"><ShieldCheck size={12} /></span>
+          Secure Exam
+        </div>
+        <div className="topbar-context">
+          <span className="exam-title">{user?.username || "—"}</span>
           <span className="badge badge-zinc">{user?.role || "student"}</span>
-          <button type="button" className="btn btn-ghost" onClick={onLogout}>
-            Logout
+        </div>
+        <div className="topbar-right">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onLogout}>
+            <LogOut size={14} /> Sign out
           </button>
         </div>
       </header>
+      {showStepIndicator ? <StepIndicator currentStep={currentStep} /> : null}
       {children}
     </div>
   )
@@ -549,17 +607,18 @@ export default function ExamPage() {
 
   if (step === "DEVICE_REGISTRATION") {
     return (
-      <StudentChrome user={user} onLogout={handleLogout}>
-        <div className="auth-shell">
-          <div className="auth-box" style={{ width: "min(540px, 100%)", textAlign: "center" }}>
-            <div className="card" style={{ minHeight: 240 }}>
-              <div>
-                <div className="label">Device Registration</div>
-                <h2 style={{ marginTop: 18 }}>Registering your device...</h2>
-                <p>Please wait while we validate your browser fingerprint.</p>
-              </div>
-            </div>
-            {error ? <div className="alert alert-error">{error}</div> : null}
+      <StudentChrome user={user} currentStep={step} onLogout={handleLogout}>
+        <div className="exam-stage">
+          <div>
+            <div className="exam-stage-eyebrow">Step 1 of 7</div>
+            <h1 className="exam-stage-title">Verifying your device</h1>
+          </div>
+          <p className="exam-stage-body">
+            Hold on while we register this browser. No action required.
+          </p>
+          {error ? <div className="alert alert-error">{error}</div> : null}
+          <div className="exam-stage-cta">
+            <span className="badge badge-accent"><span className="spinner" style={{ width: 10, height: 10 }} /> Registering</span>
           </div>
         </div>
       </StudentChrome>
@@ -568,62 +627,76 @@ export default function ExamPage() {
 
   if (step === "EXAM_SELECTION") {
     const canJoinExam = isExamJoinable
-
     return (
-      <StudentChrome user={user} onLogout={handleLogout}>
-        <div className="auth-shell">
-          <div className="auth-box" style={{ width: "min(560px, 100%)" }}>
-            <h1>Join your exam</h1>
-            <p className="muted">Enter the exam identifier provided by your teacher to continue.</p>
+      <StudentChrome user={user} currentStep={step} onLogout={handleLogout}>
+        <div className="exam-stage">
+          <div>
+            <div className="exam-stage-eyebrow">Step 2 of 7</div>
+            <h1 className="exam-stage-title">Select your exam</h1>
+          </div>
+          <p className="exam-stage-body">
+            Enter the exam ID provided by your teacher.
+          </p>
 
-            {error ? <div className="alert alert-warning">{error}</div> : null}
+          {error ? <div className="alert alert-warning">{error}</div> : null}
 
-            <form onSubmit={handleExamSelectionSubmit} className="card">
-              <label className="field">
-                <span className="label">Exam ID</span>
-                <input
-                  type="text"
-                  className="input"
-                  value={examIdInput}
-                  onChange={(event) => setExamIdInput(event.target.value)}
-                  placeholder="Paste exam ID"
-                  required
-                />
-              </label>
+          <form onSubmit={handleExamSelectionSubmit} className="card">
+            <label className="field">
+              <span className="label">Exam ID</span>
+              <input
+                type="text"
+                className="input mono"
+                value={examIdInput}
+                onChange={(event) => setExamIdInput(event.target.value)}
+                placeholder="Enter exam ID"
+                required
+              />
+            </label>
+            <button type="submit" className="btn btn-primary btn-full" disabled={loading}>
+              {loading ? <span className="spinner" aria-label="Loading" /> : "Continue"}
+            </button>
+          </form>
 
-              <button type="submit" className="btn btn-primary btn-full" disabled={loading}>
-                {loading ? <span className="spinner" aria-label="Loading" /> : "Continue"}
-              </button>
-            </form>
-
-            {examTitle ? (
-              <div className="card" style={{ display: "grid", gap: 16 }}>
-                <h2>{examTitle}</h2>
-                <div className="stats-grid">
-                  <div className="stat-card">
-                    <div className="stat-value">{examDuration}m</div>
-                    <div className="stat-label">Duration</div>
-                  </div>
-                  <div className="stat-card">
-                    <div className="stat-value">{studentsCount}/{maxStudents}</div>
-                    <div className="stat-label">Enrolled</div>
+          {examTitle ? (
+            <div className="card" style={{ display: "grid", gap: 14 }}>
+              <div>
+                <div className="eyebrow">Exam found</div>
+                <h2 style={{ marginTop: 4 }}>{examTitle}</h2>
+              </div>
+              <div className="stats-grid">
+                <div className="stat-card">
+                  <div className="stat-eyebrow">Duration</div>
+                  <div className="stat-value">{examDuration}<span className="stat-suffix">min</span></div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-eyebrow">Enrolled</div>
+                  <div className="stat-value">{studentsCount}<span className="stat-suffix">/{maxStudents}</span></div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-eyebrow">Opens</div>
+                  <div className="stat-value mono" style={{ fontSize: "0.875rem", lineHeight: 1.3 }}>
+                    {formatLocalDateTime(examStartTime)}
                   </div>
                 </div>
-                <p className="muted">Starts: {formatLocalDateTime(examStartTime)}</p>
-                <p className="muted">Ends: {formatLocalDateTime(examEndTime)}</p>
-                {new Date(examStartTime).getTime() > currentTime ? (
-                  <div className="alert alert-warning">
-                    Exam starts at {formatLocalDateTime(examStartTime)}. Please come back then.
+                <div className="stat-card">
+                  <div className="stat-eyebrow">Closes</div>
+                  <div className="stat-value mono" style={{ fontSize: "0.875rem", lineHeight: 1.3 }}>
+                    {formatLocalDateTime(examEndTime)}
                   </div>
-                ) : null}
-                {canJoinExam ? (
-                  <button type="button" className="btn btn-primary btn-full" onClick={() => void handleEnroll()} disabled={loading}>
-                    {loading ? <span className="spinner" aria-label="Loading" /> : "Join Exam"}
-                  </button>
-                ) : null}
+                </div>
               </div>
-            ) : null}
-          </div>
+              {new Date(examStartTime).getTime() > currentTime ? (
+                <div className="alert alert-warning">
+                  This exam opens at {formatLocalDateTime(examStartTime)}.
+                </div>
+              ) : null}
+              {canJoinExam ? (
+                <button type="button" className="btn btn-primary" onClick={() => void handleEnroll()} disabled={loading}>
+                  {loading ? <span className="spinner" aria-label="Loading" /> : "Enroll"}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </StudentChrome>
     )
@@ -631,27 +704,32 @@ export default function ExamPage() {
 
   if (step === "EXAM_WAITING") {
     const countdownSeconds = examState === "TEACHER_APPROVED" ? 0 : getRemainingSeconds(examStartTime, currentTime)
-
     return (
-      <StudentChrome user={user} onLogout={handleLogout}>
-        <div className="auth-shell">
-          <div className="auth-box" style={{ width: "min(620px, 100%)" }}>
-            <div className="card">
-              <span className="label">Waiting Room</span>
-              <h2 style={{ marginTop: 16 }}>{examTitle || "Waiting for teacher approval..."}</h2>
-              <p style={{ marginBottom: 14 }}>
-                Exam ID: <strong>{examId}</strong>
-              </p>
-              <p>
-                Current state: <strong>{examState || "Checking..."}</strong>
-              </p>
-              {countdownSeconds > 0 && examState !== "TEACHER_APPROVED" ? (
-                <p className="muted">Exam opens in {formatTime(countdownSeconds)}</p>
-              ) : null}
-              {resumeMessage ? <div className="alert alert-success" style={{ marginTop: 16 }}>{resumeMessage}</div> : null}
-              {error ? <div className="alert alert-error" style={{ marginTop: 16 }}>{error}</div> : null}
-            </div>
+      <StudentChrome user={user} currentStep={step} onLogout={handleLogout}>
+        <div className="exam-stage">
+          <div>
+            <div className="exam-stage-eyebrow">Step 3 of 7</div>
+            <h1 className="exam-stage-title">Waiting room</h1>
           </div>
+          <p className="exam-stage-body">
+            You&apos;re enrolled in <b>{examTitle || "this exam"}</b>. We&apos;ll continue automatically once it opens.
+          </p>
+
+          <div className="card" style={{ display: "grid", gap: 12 }}>
+            <div>
+              <span className="eyebrow">Status</span>
+              <h3 style={{ marginTop: 4 }}>{examState || "Checking…"}</h3>
+            </div>
+            {countdownSeconds > 0 && examState !== "TEACHER_APPROVED" ? (
+              <div>
+                <span className="eyebrow">Opens in</span>
+                <div className="timer-value green" style={{ marginTop: 4 }}>{formatTime(countdownSeconds)}</div>
+              </div>
+            ) : null}
+          </div>
+
+          {resumeMessage ? <div className="alert alert-success">{resumeMessage}</div> : null}
+          {error ? <div className="alert alert-error">{error}</div> : null}
         </div>
       </StudentChrome>
     )
@@ -659,32 +737,36 @@ export default function ExamPage() {
 
   if (step === "ACTIVATION") {
     return (
-      <StudentChrome user={user} onLogout={handleLogout}>
-        <div className="auth-shell">
-          <div className="auth-box" style={{ width: "min(560px, 100%)" }}>
-            <h1>Enter your activation code</h1>
-            <p className="muted">The code unlocks your exam session after teacher approval.</p>
-
-            {error ? <div className="alert alert-error">{error}</div> : null}
-
-            <form onSubmit={handleActivationSubmit} className="card">
-              <label className="field">
-                <span className="label">Activation Code</span>
-                <input
-                  type="text"
-                  className="input"
-                  value={activationCode}
-                  onChange={(event) => setActivationCode(event.target.value)}
-                  placeholder="Enter activation code"
-                  required
-                />
-              </label>
-
-              <button type="submit" className="btn btn-primary btn-full" disabled={loading}>
-                {loading ? <span className="spinner" aria-label="Loading" /> : "Activate"}
-              </button>
-            </form>
+      <StudentChrome user={user} currentStep={step} onLogout={handleLogout}>
+        <div className="exam-stage">
+          <div>
+            <div className="exam-stage-eyebrow">Step 4 of 7</div>
+            <h1 className="exam-stage-title">Enter activation code</h1>
           </div>
+          <p className="exam-stage-body">
+            Enter the activation code provided by your teacher.
+          </p>
+
+          {error ? <div className="alert alert-error">{error}</div> : null}
+
+          <form onSubmit={handleActivationSubmit} className="card">
+            <label className="field">
+              <span className="label">Activation code</span>
+              <input
+                type="text"
+                className="input mono"
+                value={activationCode}
+                onChange={(event) => setActivationCode(event.target.value)}
+                placeholder="Enter code"
+                required
+                autoFocus
+                style={{ fontSize: "1.125rem", letterSpacing: "0.08em", textAlign: "center" }}
+              />
+            </label>
+            <button type="submit" className="btn btn-primary btn-full" disabled={loading}>
+              {loading ? <span className="spinner" aria-label="Loading" /> : "Continue"}
+            </button>
+          </form>
         </div>
       </StudentChrome>
     )
@@ -692,18 +774,20 @@ export default function ExamPage() {
 
   if (step === "RANDOMIZATION") {
     return (
-      <StudentChrome user={user} onLogout={handleLogout}>
-        <div className="auth-shell">
-          <div className="auth-box" style={{ width: "min(620px, 100%)", textAlign: "center" }}>
-            <div className="card" style={{ minHeight: 260 }}>
-              <div>
-                <div className="label">Randomization</div>
-                <h2 style={{ marginTop: 18 }}>Preparing your exam...</h2>
-                <p>Shuffling questions and starting the secure timer.</p>
-                {resumeMessage ? <div className="alert alert-success" style={{ marginTop: 16 }}>{resumeMessage}</div> : null}
-              </div>
-            </div>
+      <StudentChrome user={user} currentStep={step} onLogout={handleLogout}>
+        <div className="exam-stage">
+          <div>
+            <div className="exam-stage-eyebrow">Step 5 of 7</div>
+            <h1 className="exam-stage-title">Preparing exam</h1>
           </div>
+          <p className="exam-stage-body">
+            Almost ready.
+          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span className="spinner" />
+            <span className="muted">Loading questions…</span>
+          </div>
+          {resumeMessage ? <div className="alert alert-success">{resumeMessage}</div> : null}
         </div>
       </StudentChrome>
     )
@@ -711,17 +795,19 @@ export default function ExamPage() {
 
   if (step === "SUBMITTED") {
     return (
-      <StudentChrome user={user} onLogout={handleLogout}>
-        <div className="auth-shell">
-          <div className="auth-box" style={{ width: "min(680px, 100%)" }}>
-            <div className="card">
-              <span className="label">Submitted</span>
-              <h1 style={{ marginTop: 16 }}>Exam Submitted</h1>
-              <p style={{ marginBottom: 24 }}>Your responses have been recorded.</p>
-              <button type="button" className="btn btn-ghost" onClick={handleLogout}>
-                Logout
-              </button>
-            </div>
+      <StudentChrome user={user} currentStep={step} onLogout={handleLogout}>
+        <div className="exam-stage">
+          <div>
+            <div className="exam-stage-eyebrow">Step 7 of 7</div>
+            <h1 className="exam-stage-title">Submitted</h1>
+          </div>
+          <p className="exam-stage-body">
+            Your responses have been recorded. You may close this window.
+          </p>
+          <div className="exam-stage-cta">
+            <button type="button" className="btn btn-ghost" onClick={handleLogout}>
+              <LogOut size={14} /> Sign out
+            </button>
           </div>
         </div>
       </StudentChrome>
@@ -730,59 +816,79 @@ export default function ExamPage() {
 
   if (!currentQuestion) {
     return (
-      <div>
-        <header className="navbar">
-          <span className="navbar-brand">SecureExam</span>
-          <div className="navbar-right">
-            <span className="muted">{user?.username}</span>
-            <span className={`timer-value ${timerColor}`}>{formatTime(remainingSeconds)}</span>
-          </div>
-        </header>
-        <div className="page">
+      <StudentChrome user={user} currentStep="IN_PROGRESS" onLogout={handleLogout} showStepIndicator={false}>
+        <div className="exam-stage">
           {error ? <div className="alert alert-error">{error}</div> : null}
-          <div className="card" style={{ minHeight: 220, display: "grid", placeItems: "center" }}>
-            <span className="spinner" aria-label="Loading" />
+          <div style={{ display: "grid", placeItems: "center", padding: "64px 0" }}>
+            <span className="spinner" />
           </div>
         </div>
-      </div>
+      </StudentChrome>
     )
   }
 
   return (
-    <>
-      <div className="navbar">
-        <span className="navbar-brand">SecureExam</span>
-        <div className="navbar-right">
-          <span className="muted">{user?.username}</span>
-          <span className={`timer-value ${timerColor}`}>{formatTime(remainingSeconds)}</span>
-          <button className="btn btn-ghost" onClick={() => setShowMap(true)}>
-            Question Map
+    <div className="exam-shell">
+      <header className="exam-timer-bar">
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <span className="topbar-brand">
+            <span className="topbar-brand-mark"><ShieldCheck size={12} /></span>
+            Secure Exam
+          </span>
+          <span className="muted">{user?.username || "—"}</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
+          <div style={{ textAlign: "right" }}>
+            <div className="timer-meta">Time remaining</div>
+            <div className={`timer-value ${timerColor}`}>{formatTime(remainingSeconds)}</div>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={() => setShowMap(true)}>
+            <MapIcon size={14} /> Map
           </button>
         </div>
-      </div>
+      </header>
 
-      <div className="page">
-        {error ? <div className="alert alert-error">{error}</div> : null}
+      <div className="in-progress-shell">
+        <nav className="question-rail">
+          <div className="question-rail-title">Paper</div>
+          {questions.map((q, i) => {
+            const answered = String(answers[q.question_id] || "").trim().length > 0
+            return (
+              <button
+                key={q.question_id}
+                type="button"
+                className={`question-pill ${i === currentIndex ? "active" : ""} ${answered ? "answered" : ""}`}
+                onClick={() => {
+                  setCurrentIndex(i)
+                  if (!questionStartTimes[q.question_id]) {
+                    setQuestionStartTimes((prev) => ({ ...prev, [q.question_id]: currentTime }))
+                  }
+                }}
+              >
+                <span>
+                  <span className="num">{String(i + 1).padStart(2, "0")}</span>
+                  Question {i + 1}
+                </span>
+                <span className="dot" />
+              </button>
+            )
+          })}
 
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span className="muted">
-            Question {currentIndex + 1} of {questions.length}
-          </span>
-          <span className="muted">
-            {answeredCount} answered · {totalMarks} total marks
-            {savingAnswer ? " · saving..." : ""}
-          </span>
-        </div>
-
-        <div className="card">
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-            <span className="badge badge-zinc">Q{currentIndex + 1}</span>
-            <span className="badge badge-white">{currentQuestion.marks} mark{currentQuestion.marks > 1 ? "s" : ""}</span>
+          <div className="hairline" style={{ margin: "20px 0 12px" }} />
+          <div style={{ padding: "0 4px", fontSize: "0.75rem", color: "var(--ink-3)", display: "grid", gap: 4 }}>
+            <span><span className="num" style={{ color: "var(--ink)" }}>{answeredCount}</span> of {questions.length} answered</span>
+            <span>{totalMarks} marks total</span>
+            {savingAnswer ? <span className="serif-italic">Saving…</span> : null}
           </div>
+        </nav>
 
-          <h3 style={{ marginBottom: 20, fontSize: "1.05rem", color: "#f4f4f5" }}>
-            {currentQuestion.text}
-          </h3>
+        <main className="answer-pane">
+          {error ? <div className="alert alert-error">{error}</div> : null}
+
+          <div className="question-prompt-eyebrow">
+            Question {currentIndex + 1} of {questions.length} · {currentQuestion.marks} mark{currentQuestion.marks > 1 ? "s" : ""}
+          </div>
+          <h2 className="question-prompt">{currentQuestion.text}</h2>
 
           {currentQuestion.question_type === "mcq" ? (
             <div>
@@ -792,7 +898,8 @@ export default function ExamPage() {
                   className={`option-btn ${answers[currentQuestion.question_id] === opt ? "selected" : ""}`}
                   onClick={() => void handleSelectAnswer(opt)}
                 >
-                  {String.fromCharCode(65 + i)}. {opt}
+                  <span className="option-mark">{String.fromCharCode(65 + i)}</span>
+                  <span>{opt}</span>
                 </button>
               ))}
             </div>
@@ -801,97 +908,111 @@ export default function ExamPage() {
           {currentQuestion.question_type === "text" ? (
             <div className="field">
               <textarea
-                className="input"
-                rows={5}
-                style={{ resize: "vertical" }}
+                className="textarea"
+                rows={6}
                 placeholder={
                   currentQuestion.word_limit > 0
-                    ? `Answer in max ${currentQuestion.word_limit} words`
-                    : "Type your answer here"
+                    ? `Up to ${currentQuestion.word_limit} words…`
+                    : "Compose your answer…"
                 }
                 value={answers[currentQuestion.question_id] || ""}
                 onChange={(event) => handleTextAnswer(event.target.value)}
               />
               {currentQuestion.word_limit > 0 ? (
-                <span className="muted">
-                  {(answers[currentQuestion.question_id] || "").trim().split(/\s+/).filter(Boolean).length}
-                  / {currentQuestion.word_limit} words
+                <span className="muted" style={{ textAlign: "right" }}>
+                  <span className="num">
+                    {(answers[currentQuestion.question_id] || "").trim().split(/\s+/).filter(Boolean).length}
+                  </span>
+                  &nbsp;/ {currentQuestion.word_limit} words
                 </span>
               ) : null}
             </div>
           ) : null}
-        </div>
 
-        <div style={{ display: "flex", gap: 8, justifyContent: "space-between" }}>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn btn-ghost" disabled={currentIndex === 0} onClick={handlePrevious}>
-              ← Previous
-            </button>
-            <button className="btn btn-ghost" onClick={handleSkip}>
-              Skip
-            </button>
-            <button className="btn btn-primary" disabled={currentIndex === questions.length - 1} onClick={handleNext}>
-              Next →
-            </button>
+          <div className="answer-actions">
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn btn-ghost" disabled={currentIndex === 0} onClick={handlePrevious}>
+                &larr; Previous
+              </button>
+              <button className="btn btn-ghost" onClick={handleSkip}>
+                Skip
+              </button>
+              <button className="btn btn-primary" disabled={currentIndex === questions.length - 1} onClick={handleNext}>
+                Next &rarr;
+              </button>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              {savingAnswer ? <span className="answer-saved">saving…</span> : null}
+              <button className="btn btn-danger" onClick={() => setShowSubmitConfirm(true)}>
+                <Send size={14} /> Submit final answers
+              </button>
+            </div>
           </div>
-          <button className="btn btn-danger" onClick={() => setShowSubmitConfirm(true)}>
-            Submit Exam
-          </button>
-        </div>
+        </main>
       </div>
 
       {showMap ? (
         <div
           style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.7)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 50,
+            position: "fixed", inset: 0,
+            background: "rgba(11, 12, 10, 0.55)",
+            backdropFilter: "blur(4px)",
+            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50,
           }}
+          onClick={() => setShowMap(false)}
         >
-          <div className="card" style={{ width: "min(500px,90vw)", maxHeight: "80vh", overflowY: "auto" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-              <h2 style={{ margin: 0 }}>Question Map</h2>
-              <button className="btn btn-ghost" onClick={() => setShowMap(false)}>✕</button>
+          <div className="card" style={{ width: "min(540px,92vw)", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 16 }}>
+              <div>
+                <div className="eyebrow">Navigate</div>
+                <h2 style={{ marginTop: 4 }}>Question map</h2>
+              </div>
+              <button className="btn-icon" onClick={() => setShowMap(false)} aria-label="Close map">✕</button>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
-              {questions.map((q, i) => (
-                <button
-                  key={q.question_id}
-                  onClick={() => {
-                    setCurrentIndex(i)
-                    setShowMap(false)
-                    if (!questionStartTimes[q.question_id]) {
-                      setQuestionStartTimes((prev) => ({ ...prev, [q.question_id]: currentTime }))
-                    }
-                  }}
-                  style={{
-                    padding: "10px",
-                    borderRadius: 8,
-                    border: "1px solid",
-                    borderColor: String(answers[q.question_id] || "").trim() ? "#4ade80" : "#27272a",
-                    background: String(answers[q.question_id] || "").trim() ? "rgba(34,197,94,0.1)" : "#09090b",
-                    color: i === currentIndex ? "#f4f4f5" : "#a1a1aa",
-                    cursor: "pointer",
-                    fontWeight: i === currentIndex ? 700 : 400,
-                  }}
-                >
-                  {i + 1}
-                </button>
-              ))}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(56px, 1fr))", gap: 6 }}>
+              {questions.map((q, i) => {
+                const answered = String(answers[q.question_id] || "").trim().length > 0
+                return (
+                  <button
+                    key={q.question_id}
+                    onClick={() => {
+                      setCurrentIndex(i)
+                      setShowMap(false)
+                      if (!questionStartTimes[q.question_id]) {
+                        setQuestionStartTimes((prev) => ({ ...prev, [q.question_id]: currentTime }))
+                      }
+                    }}
+                    style={{
+                      padding: "12px 0",
+                      borderRadius: "var(--radius-sm)",
+                      border: "1px solid",
+                      borderColor: answered ? "var(--accent)" : "var(--rule)",
+                      background: i === currentIndex ? "var(--ink)" : answered ? "var(--accent-tint)" : "var(--vellum)",
+                      color: i === currentIndex ? "var(--paper)" : answered ? "var(--accent)" : "var(--ink-2)",
+                      cursor: "pointer",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: "0.8125rem",
+                      fontWeight: 500,
+                    }}
+                  >
+                    {String(i + 1).padStart(2, "0")}
+                  </button>
+                )
+              })}
             </div>
-            <hr className="divider" />
-            <div style={{ display: "flex", gap: 16 }}>
-              <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.8rem", color: "#a1a1aa" }}>
-                <span style={{ width: 12, height: 12, borderRadius: 3, background: "rgba(34,197,94,0.3)", display: "inline-block" }} />
+            <div className="rule-ornate">legend</div>
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.8rem", color: "var(--ink-3)" }}>
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: "var(--accent-tint)", border: "1px solid var(--accent)", display: "inline-block" }} />
                 Answered ({answeredCount})
               </span>
-              <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.8rem", color: "#a1a1aa" }}>
-                <span style={{ width: 12, height: 12, borderRadius: 3, background: "#27272a", display: "inline-block" }} />
+              <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.8rem", color: "var(--ink-3)" }}>
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: "var(--vellum)", border: "1px solid var(--rule)", display: "inline-block" }} />
                 Unanswered ({questions.length - answeredCount})
+              </span>
+              <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.8rem", color: "var(--ink-3)" }}>
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: "var(--ink)", display: "inline-block" }} />
+                Current
               </span>
             </div>
           </div>
@@ -901,28 +1022,26 @@ export default function ExamPage() {
       {showSubmitConfirm ? (
         <div
           style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.7)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 50,
+            position: "fixed", inset: 0,
+            background: "rgba(11, 12, 10, 0.55)",
+            backdropFilter: "blur(4px)",
+            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50,
           }}
+          onClick={() => setShowSubmitConfirm(false)}
         >
-          <div className="card" style={{ width: "min(400px,90vw)" }}>
-            <h2>Submit Exam?</h2>
-            <p className="muted" style={{ marginBottom: 20 }}>
-              You have answered {answeredCount} of {questions.length} questions.
+          <div className="card" style={{ width: "min(440px,92vw)" }} onClick={(e) => e.stopPropagation()}>
+            <div className="eyebrow">Final answer</div>
+            <h2 style={{ marginTop: 4 }}>Hand it in?</h2>
+            <p style={{ marginTop: 12, marginBottom: 20 }}>
+              You&apos;ve answered <b className="num">{answeredCount}</b> of <b className="num">{questions.length}</b>.
               {questions.length - answeredCount > 0
-                ? ` ${questions.length - answeredCount} questions are unanswered.`
-                : ""}
-              {" "}
-              This action cannot be undone.
+                ? ` ${questions.length - answeredCount} question${questions.length - answeredCount > 1 ? "s remain" : " remains"} blank.`
+                : " Every question has an answer."}
+              {" "}This is irreversible.
             </p>
             <div style={{ display: "flex", gap: 8 }}>
               <button className="btn btn-ghost btn-full" onClick={() => setShowSubmitConfirm(false)}>
-                Cancel
+                Not yet
               </button>
               <button
                 className="btn btn-danger btn-full"
@@ -931,12 +1050,12 @@ export default function ExamPage() {
                   void handleSubmitExam()
                 }}
               >
-                Yes, Submit
+                <Send size={14} /> Submit
               </button>
             </div>
           </div>
         </div>
       ) : null}
-    </>
+    </div>
   )
 }

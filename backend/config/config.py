@@ -15,7 +15,7 @@ TIMEZONE = os.getenv("TIMEZONE", "UTC")
 APP_TZ = pytz.timezone(TIMEZONE)
 
 # Base URL for internal service calls
-BASE_URL = os.getenv("BASE_URL", "http://localhost:5000")
+BASE_URL = os.getenv("BASE_URL", "http://localhost:5500")
 # Port the Flask app should bind to when started via app.py
 PORT = int(os.getenv("PORT", 5500))
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
@@ -41,6 +41,7 @@ activity_events_col = db["activity_events"]
 multisession_attempts_col = db["multisession_attempts"]
 behavioral_events_col = db["behavioral_events"]
 similarity_results_col = db["similarity_results"]
+otp_codes_col = db["otp_codes"]
 
 
 def now():

@@ -35,3 +35,13 @@ frontend/.vite/
 Thumbs.db
 .vscode/
 .idea/
+
+# AI assistant artifacts
+.claude/
+.copilot/
+.github/copilot/
+.cursor/
+.aider*
+
+# Local assessment / scratch
+project-assessment/
