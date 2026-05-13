@@ -9,7 +9,6 @@ import {
   ScrollText,
   ShieldAlert,
   ShieldCheck,
-  Users,
   LogOut,
   Radio,
   Activity,
@@ -17,6 +16,8 @@ import {
   Eye,
   Zap,
   Gauge,
+  Copy,
+  Check,
 } from "lucide-react"
 import client from "../../api/client"
 import { useAuth } from "../../hooks/useAuth"
@@ -70,6 +71,28 @@ function normalizeArray<T>(payload: unknown, keys: string[]): T[] {
   }
 
   return []
+}
+
+function CopyButton({ value, label }: { value: string; label?: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      className="btn-icon"
+      title={copied ? "Copied" : (label || "Copy")}
+      aria-label={label || "Copy"}
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(value)
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1500)
+        } catch {/* clipboard blocked */}
+      }}
+      style={{ color: copied ? "var(--accent)" : undefined }}
+    >
+      {copied ? <Check size={14} /> : <Copy size={14} />}
+    </button>
+  )
 }
 
 function humanizeAction(action: string): string {
@@ -972,7 +995,6 @@ export default function Dashboard() {
     { key: "questions", label: "Questions", icon: FileQuestion },
     { key: "logs", label: "Activity", icon: ScrollText },
     { key: "risk", label: "Risk", icon: ShieldAlert },
-    { key: "students", label: "Students", icon: Users },
   ]
 
   const pageMeta: Record<Tab, { title: string; sub: string }> = {
@@ -1100,22 +1122,23 @@ export default function Dashboard() {
                 <input className="input" value={newExamDesc} onChange={(event) => setNewExamDesc(event.target.value)} />
               </div>
 
-              <div className="field">
-                <label className="label">Duration (minutes)</label>
-                <input className="input" type="number" value={newExamDuration} onChange={(event) => setNewExamDuration(Number.parseInt(event.target.value || "0", 10) || 0)} />
-              </div>
-
-              <div className="field">
-                <label className="label">Max Students</label>
-                <input
-                  className="input"
-                  type="number"
-                  min={1}
-                  max={200}
-                  value={newExamMaxStudents}
-                  onChange={(event) => setNewExamMaxStudents(Number.parseInt(event.target.value || "0", 10) || 0)}
-                  placeholder="30"
-                />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div className="field">
+                  <label className="label">Duration (minutes)</label>
+                  <input className="input" type="number" value={newExamDuration} onChange={(event) => setNewExamDuration(Number.parseInt(event.target.value || "0", 10) || 0)} />
+                </div>
+                <div className="field">
+                  <label className="label">Max students</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={newExamMaxStudents}
+                    onChange={(event) => setNewExamMaxStudents(Number.parseInt(event.target.value || "0", 10) || 0)}
+                    placeholder="30"
+                  />
+                </div>
               </div>
 
               <div className="field">
@@ -1239,6 +1262,31 @@ export default function Dashboard() {
                       <span><b style={{ color: "var(--ink-2)" }}>Starts</b> · {formatLocalDateTime(selectedExam.start_time)}</span>
                       <span><b style={{ color: "var(--ink-2)" }}>Ends</b> · {formatLocalDateTime(selectedExam.end_time)}</span>
                     </div>
+
+                    <div className="hairline" />
+
+                    <div style={{ display: "grid", gap: 12 }}>
+                      <div>
+                        <div className="eyebrow" style={{ marginBottom: 6 }}>Exam ID — share with students</div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          <code style={{ fontFamily: "var(--font-mono)", fontSize: "0.8125rem", padding: "8px 12px", background: "var(--surface-2)", border: "1px solid var(--rule)", borderRadius: "var(--radius-sm)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {examId}
+                          </code>
+                          <CopyButton value={examId} label="Copy exam ID" />
+                        </div>
+                      </div>
+                      {activationCode ? (
+                        <div>
+                          <div className="eyebrow" style={{ marginBottom: 6 }}>Join code — share with students</div>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <code style={{ fontFamily: "var(--font-mono)", fontSize: "1rem", fontWeight: 500, padding: "8px 12px", background: "var(--accent-tint)", border: "1px solid var(--accent)", color: "var(--accent)", borderRadius: "var(--radius-sm)", flex: 1, letterSpacing: "0.05em" }}>
+                              {activationCode}
+                            </code>
+                            <CopyButton value={activationCode} label="Copy join code" />
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 ) : null}
 
@@ -1283,7 +1331,6 @@ export default function Dashboard() {
                   </button>
                 </div>
 
-                {activationCode ? <div className="alert alert-success">Activation Code: {activationCode}</div> : null}
 
                 <hr style={{ margin: "24px 0", border: "none", borderTop: "1px solid #e5e7eb" }} />
 
@@ -1721,14 +1768,15 @@ export default function Dashboard() {
               <input className="input" value={editExamDesc} onChange={(event) => setEditExamDesc(event.target.value)} />
             </div>
 
-            <div className="field" style={{ marginBottom: 16 }}>
-              <label className="label">Duration (minutes)</label>
-              <input className="input" type="number" value={editExamDuration} onChange={(event) => setEditExamDuration(Number.parseInt(event.target.value || "0", 10) || 0)} />
-            </div>
-
-            <div className="field" style={{ marginBottom: 16 }}>
-              <label className="label">Max Students</label>
-              <input className="input" type="number" min={1} max={200} value={editExamMaxStudents} onChange={(event) => setEditExamMaxStudents(Number.parseInt(event.target.value || "0", 10) || 0)} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label className="label">Duration (minutes)</label>
+                <input className="input" type="number" value={editExamDuration} onChange={(event) => setEditExamDuration(Number.parseInt(event.target.value || "0", 10) || 0)} />
+              </div>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label className="label">Max students</label>
+                <input className="input" type="number" min={1} max={200} value={editExamMaxStudents} onChange={(event) => setEditExamMaxStudents(Number.parseInt(event.target.value || "0", 10) || 0)} />
+              </div>
             </div>
 
             <div className="field" style={{ marginBottom: 16 }}>
