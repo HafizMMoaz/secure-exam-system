@@ -394,7 +394,7 @@ export default function ExamPage() {
         const response = await client.get<ExamStateResponse>(`/api/auth/exam/state/${examId}`)
         if (cancelled) return
 
-        const { state: nextState, student_approved } = response.data.data
+        const { state: nextState, student_approved, student_activated } = response.data.data
         setExamState(nextState)
 
         if (
@@ -410,13 +410,16 @@ export default function ExamPage() {
         // PRD section 14: teacher approval (step 3) gates activation (step 4).
         // Only route to ACTIVATION once this student has actually been
         // approved by the teacher - not just because the exam is open.
+        // If the student has ALREADY validated the activation code (the
+        // backend single-use guard would otherwise reject a second try),
+        // jump straight to RANDOMIZATION so they can resume cleanly.
         if (
           student_approved &&
           (nextState === "TEACHER_APPROVED" ||
             nextState === "ACTIVATION_VALID" ||
             nextState === "IN_PROGRESS")
         ) {
-          setStep("ACTIVATION")
+          setStep(student_activated ? "RANDOMIZATION" : "ACTIVATION")
         }
       } catch (waitingError) {
         if (!cancelled) {

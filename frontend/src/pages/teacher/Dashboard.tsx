@@ -194,6 +194,9 @@ export default function Dashboard() {
   const [liveEvents, setLiveEvents] = useState<Array<{ kind: string; user_id?: string; username?: string; timestamp?: string }>>([])
   const logsSocketRef = useRef<Socket | null>(null)
   const examRoomSocketRef = useRef<Socket | null>(null)
+  // Mirror of the selected exam so the always-on log socket (which sets up
+  // once on mount) can filter events without re-subscribing on every change.
+  const examIdRef = useRef("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
@@ -239,6 +242,12 @@ export default function Dashboard() {
   // Student approval state
   const [examStudents, setExamStudents] = useState<Array<{ student_id: string; username?: string; joined_at: string; approved: boolean; approved_at: string | null; approved_by: string | null; activated_at?: string | null }>>([])
   const [approvingStudentId, setApprovingStudentId] = useState("")
+
+  // Sync the ref used by the always-on log socket to filter events to
+  // the currently-selected exam.
+  useEffect(() => {
+    examIdRef.current = examId
+  }, [examId])
 
   const highRiskCount = riskData.filter((item) => item.risk_level === "HIGH").length
   const canApproveExam = examState === "NOT_STARTED" || examState === "DEVICE_VERIFIED"
@@ -916,6 +925,15 @@ export default function Dashboard() {
 
     socket.on("connect", () => socket.emit("subscribe_logs"))
     socket.on("log_event", (incoming: LogEntry) => {
+      // The logs WebSocket is global - it streams every audit entry in
+      // the system. The audit-log view is scoped to the selected exam
+      // (initial load filters by exam_id), so the live stream has to
+      // match. Empty exam_id is a system-wide event (no exam context)
+      // and we still surface it for the selected exam too.
+      const current = examIdRef.current
+      if (!current) return
+      const incomingExam = incoming.exam_id || ""
+      if (incomingExam && incomingExam !== current) return
       setLogs((prev) => [{ ...incoming, received_at: incoming.timestamp } as LogEntry, ...prev].slice(0, 500))
     })
 
@@ -1737,10 +1755,10 @@ export default function Dashboard() {
                   {!examId
                     ? "Pick an exam from the sidebar to see its risk breakdown."
                     : examState === "COMPLETED"
-                    ? "Scores haven't been published — they'll appear here automatically once they're ready."
+                    ? "Scores will appear here once they finish publishing."
                     : examState === "SUBMITTED" || examState === "ANALYZING"
-                    ? "Run risk scoring from the Overview tab. Results show up here the moment they're ready."
-                    : "Scores appear once students finish the exam and risk scoring has been run."}
+                    ? "Scoring is running in the background. Results will show up here as soon as they're ready."
+                    : "Scores appear automatically once the exam ends."}
                 </div>
               </div>
             ) : (

@@ -63,32 +63,38 @@ def _reseed_demo(db):
     ])
 
     exam_id = ObjectId()
+    students_list = [
+        {"student_id": str(student_id), "approved": True, "joined_at": now,
+         "approved_at": now, "approved_by": str(teacher_id)},
+        {"student_id": str(student2_id), "approved": True, "joined_at": now,
+         "approved_at": now, "approved_by": str(teacher_id)},
+    ]
     db.exams.insert_one({
         "_id": exam_id,
-        "title": "Demo Exam — Math",
+        "title": "Demo Exam - Math",
         "description": "Walkthrough exam for the final viva",
         "duration_minutes": 30,
         "created_by": str(teacher_id),
-        "teacher_id": str(teacher_id),
         "state": "ACTIVATION_VALID",
-        "total_questions": 3,
-        "total_marks": 30,
-        "students_count": 2,
+        "total_questions": 0,
+        "total_marks": 0,
+        "students_count": len(students_list),
         "max_students": 10,
-        "starts_at": now,
-        "ends_at": now + timedelta(hours=2),
+        "start_time": now,
+        "end_time": now + timedelta(hours=2),
         "created_at": now,
-        "enrolled_students": [
-            {"student_id": str(student_id), "approved": True, "joined_at": now,
-             "approved_at": now, "approved_by": str(teacher_id)},
-            {"student_id": str(student2_id), "approved": True, "joined_at": now,
-             "approved_at": now, "approved_by": str(teacher_id)},
-        ],
+        "students": students_list,
     })
+    # Activation codes are validated by SHA-256 hash, not raw code, so the
+    # demo code must be stored under code_hash to actually work.
+    import hashlib
     db.activation_codes.insert_one({
         "exam_id": str(exam_id),
-        "code": "DEMO123",
-        "used": False,
+        "code_hash": hashlib.sha256(b"DEMO123").hexdigest(),
+        "is_used": False,
+        "used_by": None,
+        "used_at": None,
+        "created_by": str(teacher_id),
         "expires_at": now + timedelta(hours=2),
         "created_at": now,
     })

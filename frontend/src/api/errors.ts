@@ -40,8 +40,11 @@ function humanize(raw: string): string {
   }
 
   // Bare ExamStateException fallback (no current/expected captured).
-  if (/^Exam (already approved|already submitted)/i.test(trimmed)) {
-    return trimmed.replace(/^Exam /, "This exam has already been ").replace(" approved", "approved.").replace(" submitted", "submitted.")
+  if (/^Exam already approved/i.test(trimmed)) {
+    return "This exam has already been approved."
+  }
+  if (/^Exam already submitted/i.test(trimmed)) {
+    return "This exam has already been submitted."
   }
 
   // Common literal messages we can soften without changing meaning.

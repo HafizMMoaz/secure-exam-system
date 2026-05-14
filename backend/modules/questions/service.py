@@ -974,6 +974,24 @@ def get_exam_results(user_context, exam_id):
     if not _is_teacher_exam_owner(user_context, exam):
         raise ForbiddenException("You are not allowed to view results for this exam")
 
+    # Results are only meaningful once the exam window has closed. The
+    # frontend hides the "Export Results" button until then, but the
+    # backend has to enforce the gate too - otherwise a teacher could
+    # poll the endpoint mid-exam and see interim scores.
+    from datetime import datetime
+    from pytz import utc
+    end_time = exam.get("end_time")
+    if end_time is not None and end_time.tzinfo is None:
+        end_time = utc.localize(end_time)
+    current = datetime.now(utc)
+    exam_state = exam.get("state")
+    exam_over = exam_state == ExamState.COMPLETED.value or (end_time is not None and current > end_time)
+    if not exam_over:
+        raise ExamStateException(
+            current_state=exam_state,
+            required_state="COMPLETED or end_time past",
+        )
+
     questions = list(questions_col.find({"exam_id": exam_id}))
     mcq_qs = [q for q in questions if q.get("question_type") == "mcq"]
     text_qs = [q for q in questions if q.get("question_type") == "text"]
@@ -1010,10 +1028,21 @@ def get_exam_results(user_context, exam_id):
         if sid not in risk_map:
             risk_map[sid] = float(rdoc.get("score", 0))
 
+    # One query for every student's responses instead of one per student
+    # (was N+1). At max_students=200 this is the difference between 200
+    # round-trips and 1.
+    all_responses = list(responses_col.find({
+        "exam_id": exam_id,
+        "student_id": {"$in": student_ids},
+    })) if student_ids else []
+    responses_by_student = {}
+    for r in all_responses:
+        sid_key = r.get("student_id")
+        responses_by_student.setdefault(sid_key, {})[str(r.get("question_id"))] = r
+
     rows = []
     for sid in student_ids:
-        responses = list(responses_col.find({"exam_id": exam_id, "student_id": sid}))
-        resp_by_q = {str(r.get("question_id")): r for r in responses}
+        resp_by_q = responses_by_student.get(sid, {})
 
         mcq_correct = 0
         mcq_wrong = 0

@@ -59,5 +59,8 @@ def iso_utc_z(value=None):
 	"""
 	dt = value if value is not None else now()
 	if dt.tzinfo is None:
-		dt = APP_TZ.localize(dt)
+		# PyMongo stores datetimes as naive UTC, so a naive value coming
+		# back from the DB is already UTC. Localising it as APP_TZ would
+		# shift the timestamp by the APP_TZ offset on display.
+		dt = pytz.utc.localize(dt)
 	return dt.astimezone(pytz.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
