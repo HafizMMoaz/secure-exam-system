@@ -43,8 +43,8 @@ def _auto_submit_expired_exams():
                         },
                     )
 
-                    # §27.6 (strict) exemption: auto_submit runs as a system
-                    # process without a user JWT. The §27.6 central state
+                    # section 27.6 (strict) exemption: auto_submit runs as a system
+                    # process without a user JWT. The section 27.6 central state
                     # endpoint requires authentication; documenting this
                     # path as the single sanctioned bypass for system-driven
                     # transitions. All non-system transitions still route
@@ -72,6 +72,22 @@ def _auto_submit_expired_exams():
                         },
                         timeout=2,
                     )
+
+                    # End-of-window finalization: kick off risk compute now
+                    # so the dashboard reflects the closure right away,
+                    # rather than waiting for a teacher click that never
+                    # comes. Risk service handles the SUBMITTED -> ANALYZING
+                    # -> COMPLETED transitions internally.
+                    try:
+                        from modules.risk.service import compute_exam_risk
+                        compute_exam_risk(
+                            user_context={"role": "system", "user_id": "system_auto_submit"},
+                            exam_id=exam_id,
+                            auth_header="",
+                            system_actor=True,
+                        )
+                    except Exception:
+                        pass
                 except Exception:
                     pass
 

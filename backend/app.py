@@ -22,7 +22,7 @@ register_error_handlers(app)
 # ── Rate limiting (Phase 5.4) ─────────────────────────────────────────────────
 limiter.init_app(app)
 
-# ── WebSocket monitoring channel (PRD §24 bonus) ──────────────────────────────
+# ── WebSocket monitoring channel (PRD section 24 bonus) ──────────────────────────────
 socketio.init_app(app, cors_allowed_origins=[FRONTEND_URL, "*"])
 
 register_routes(app)

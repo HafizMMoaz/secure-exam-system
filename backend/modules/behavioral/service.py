@@ -71,7 +71,7 @@ def record_event(user_context, payload):
     except PyMongoError as exc:
         raise DatabaseException(str(exc))
 
-    # §24 bonus: push to WebSocket subscribers of this exam's room.
+    # section 24 bonus: push to WebSocket subscribers of this exam's room.
     from middleware.socketio_app import emit_monitoring_event
     emit_monitoring_event(exam_id, "behavioral_event", {
         "user_id": user_id, "exam_id": exam_id,
@@ -147,7 +147,7 @@ def analyze_student_behavior(user_context, requested_user_id, exam_id):
         for e in db_events
     ]
 
-    # Pull clipboard paste timestamps for the §24 bonus clipboard-burst rule.
+    # Pull clipboard paste timestamps for the section 24 bonus clipboard-burst rule.
     paste_seconds = []
     try:
         clip_cursor = clipboard_events_col.find(

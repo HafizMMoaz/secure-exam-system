@@ -1,10 +1,10 @@
 """
-PRD §27.8 integration test suite — the four MUST-pass tests.
+PRD section 27.8 integration test suite - the four MUST-pass tests.
 
-1. JWT test:    Call API with expired JWT → HTTP 401
-2. Logging:     Generate a log via gateway → verify it appears in logs collection
+1. JWT test:    Call API with expired JWT -> HTTP 401
+2. Logging:     Generate a log via gateway -> verify it appears in logs collection
 3. Health:      GET /api/<mod>/health returns 200 in under 1 second (all 17 modules)
-4. State:       Attempt an exam action in the wrong state → HTTP 409
+4. State:       Attempt an exam action in the wrong state -> HTTP 409
 """
 
 import time
@@ -14,7 +14,7 @@ import pytest
 import requests
 
 
-# 1. JWT expiry test (§27.8.1)
+# 1. JWT expiry test (section 27.8.1)
 EXPIRED_JWT_PROBES = [
     "/api/auth/profile",
     "/api/questions/exams/list",
@@ -33,7 +33,7 @@ def test_expired_jwt_returns_401(base_url, expired_teacher_token, path):
     assert r.status_code == 401, f"{path} returned {r.status_code}, expected 401"
 
 
-# 2. Logging gateway round-trip (§27.8.2)
+# 2. Logging gateway round-trip (section 27.8.2)
 def test_log_gateway_round_trip(base_url, db, teacher_token):
     token, user_id = teacher_token
     action = f"pytest_action_{int(time.time() * 1000)}"
@@ -67,7 +67,7 @@ def test_log_gateway_round_trip(base_url, db, teacher_token):
     assert doc.get("integrity_hash"), "log document missing integrity_hash"
 
 
-# 3. Per-module health latency (§27.8.3)
+# 3. Per-module health latency (section 27.8.3)
 MODULE_HEALTH_PATHS = [
     "/api/auth/health",
     "/api/session/health",
@@ -98,11 +98,11 @@ def test_module_health_under_1s(base_url, path):
     assert elapsed < 1.0, f"{path} took {elapsed:.3f}s, must be < 1.0s"
 
 
-# 4. Wrong-state exam action (§27.8.4)
+# 4. Wrong-state exam action (section 27.8.4)
 def test_answer_submit_in_wrong_state_returns_409(base_url, seeded_exam, student_token):
     """
     Seeded exam is in NOT_STARTED. Submitting an answer requires IN_PROGRESS,
-    so the server must return 409 Conflict per §27.2.
+    so the server must return 409 Conflict per section 27.2.
     """
     token, _ = student_token
     payload = {
@@ -215,7 +215,7 @@ def test_otp_wrong_code_rejected(base_url, db):
     assert r.status_code == 401, r.text
 
 
-# 10. WebSocket monitoring channel (Phase 4 / §24 bonus — true WebSockets)
+# 10. WebSocket monitoring channel (Phase 4 / section 24 bonus - true WebSockets)
 def test_websocket_monitoring_round_trip(base_url, db):
     """
     Connect a python-socketio client to /monitoring, subscribe to an
@@ -240,7 +240,7 @@ def test_websocket_monitoring_round_trip(base_url, db):
 
     sio.connect(base_url, namespaces=["/monitoring"],
                 transports=["polling", "websocket"], wait_timeout=5)
-    # Emit subscribe only after connect() returns — namespace is ready now.
+    # Emit subscribe only after connect() returns - namespace is ready now.
     sio.emit("subscribe", {"exam_id": "ws_demo_exam"}, namespace="/monitoring")
 
     deadline = time.monotonic() + 3
@@ -333,7 +333,7 @@ def test_log_integrity_verify_detects_tamper(base_url, db, teacher_token):
     """
     Write a log via the gateway, hand-edit the stored document in Mongo,
     then call /api/logs/verify and assert the entry surfaces as tampered.
-    Demonstrates the §27.3 SHA-256 integrity claim.
+    Demonstrates the section 27.3 SHA-256 integrity claim.
     """
     token, user_id = teacher_token
     action = f"pytest_tamper_{int(time.time() * 1000)}"

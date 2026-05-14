@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
-import axios from "axios"
 import { useNavigate } from "react-router-dom"
 import {
   ShieldCheck,
@@ -8,6 +7,7 @@ import {
   Map as MapIcon,
 } from "lucide-react"
 import client from "../../api/client"
+import { getErrorMessage } from "../../api/errors"
 import { useAuth } from "../../hooks/useAuth"
 import { getDeviceSignals, useDeviceFingerprint } from "../../hooks/useDeviceFingerprint"
 import { useExamMonitoring } from "../../hooks/useExamMonitoring"
@@ -15,6 +15,9 @@ import type { ApiResponse, ExamStep, Question } from "../../types"
 
 interface ExamStatePayload {
   state: string
+  student_enrolled?: boolean
+  student_approved?: boolean
+  student_activated?: boolean
 }
 
 interface PublicExamPayload {
@@ -27,6 +30,7 @@ interface PublicExamPayload {
   end_time: string
   max_students: number
   students_count: number
+  approved_count?: number
   total_questions: number
   total_marks: number
 }
@@ -57,17 +61,6 @@ type EnrollExamResponse = ApiResponse<EnrollExamPayload>
 type TimerStartResponse = ApiResponse<TimerStartPayload>
 type AllQuestionsResponse = ApiResponse<AllQuestionsPayload>
 type AnswersListResponse = ApiResponse<AnswersListPayload>
-
-function getErrorMessage(error: unknown) {
-  if (axios.isAxiosError(error)) {
-    const responseMessage = error.response?.data?.message
-    if (typeof responseMessage === "string" && responseMessage.length > 0) {
-      return responseMessage
-    }
-  }
-
-  return "Unknown error"
-}
 
 function formatLocalDateTime(value: string) {
   if (!value) return "-"
@@ -401,13 +394,29 @@ export default function ExamPage() {
         const response = await client.get<ExamStateResponse>(`/api/auth/exam/state/${examId}`)
         if (cancelled) return
 
-        const nextState = response.data.data.state
+        const { state: nextState, student_approved } = response.data.data
         setExamState(nextState)
-        if (nextState === "TEACHER_APPROVED") {
+
+        if (
+          nextState === "SUBMITTED" ||
+          nextState === "ANALYZING" ||
+          nextState === "COMPLETED"
+        ) {
+          setResumeMessage("This exam has already concluded.")
+          setStep("SUBMITTED")
+          return
+        }
+
+        // PRD section 14: teacher approval (step 3) gates activation (step 4).
+        // Only route to ACTIVATION once this student has actually been
+        // approved by the teacher - not just because the exam is open.
+        if (
+          student_approved &&
+          (nextState === "TEACHER_APPROVED" ||
+            nextState === "ACTIVATION_VALID" ||
+            nextState === "IN_PROGRESS")
+        ) {
           setStep("ACTIVATION")
-        } else if (nextState === "IN_PROGRESS") {
-          setResumeMessage("Resuming your exam session...")
-          setStep("RANDOMIZATION")
         }
       } catch (waitingError) {
         if (!cancelled) {
@@ -574,12 +583,29 @@ export default function ExamPage() {
       setExamStartTimeStr(exam.start_time)
       setExamEndTime(exam.end_time)
       setMaxStudents(exam.max_students)
-      setStudentsCount(exam.students_count)
+      // Show approved count to the student - pending enrolees inflating
+       // this number gave the wrong sense of "how full the exam is".
+       setStudentsCount(exam.approved_count ?? exam.students_count)
       setTotalMarks(exam.total_marks || 0)
+      setExamState(exam.state)
 
-      if (new Date(exam.start_time).getTime() > currentTime) {
-        setError(`Exam starts at ${formatLocalDateTime(exam.start_time)}. Please come back then.`)
+      // If the exam is already past the student-take window (submitted,
+      // being analyzed, or fully completed) there is nothing left to do -
+      // route straight to the SUBMITTED screen with a finished message
+      // instead of letting the user click "Enroll" and hit a raw 400.
+      if (
+        exam.state === "SUBMITTED" ||
+        exam.state === "ANALYZING" ||
+        exam.state === "COMPLETED"
+      ) {
+        setResumeMessage("This exam has already concluded.")
+        setStep("SUBMITTED")
+        return
       }
+
+      // "Opens at X" is already rendered inside the exam-found card as a
+      // warning alert - no need to also fire it through setError here, that
+      // produced a duplicate above the card.
     } catch (selectionError) {
       setError(getErrorMessage(selectionError))
     } finally {
@@ -712,13 +738,15 @@ export default function ExamPage() {
             <h1 className="exam-stage-title">Waiting room</h1>
           </div>
           <p className="exam-stage-body">
-            You&apos;re enrolled in <b>{examTitle || "this exam"}</b>. We&apos;ll continue automatically once it opens.
+            You&apos;re enrolled in <b>{examTitle || "this exam"}</b>. Your teacher
+            needs to approve you before you can enter the activation code.
+            We&apos;ll continue automatically once they do.
           </p>
 
           <div className="card" style={{ display: "grid", gap: 12 }}>
             <div>
               <span className="eyebrow">Status</span>
-              <h3 style={{ marginTop: 4 }}>{examState || "Checking…"}</h3>
+              <h3 style={{ marginTop: 4 }}>Waiting for teacher approval</h3>
             </div>
             {countdownSeconds > 0 && examState !== "TEACHER_APPROVED" ? (
               <div>
@@ -794,16 +822,24 @@ export default function ExamPage() {
   }
 
   if (step === "SUBMITTED") {
+    const isFinishedExternally =
+      examState === "SUBMITTED" || examState === "ANALYZING" || examState === "COMPLETED"
+    const headline =
+      resumeMessage === "This exam has already concluded." ? "Exam closed" : "Submitted"
+    const body =
+      resumeMessage === "This exam has already concluded."
+        ? "This exam has finished and is no longer open. If you took it earlier, your responses are on file."
+        : "Your responses have been recorded. You may close this window."
     return (
       <StudentChrome user={user} currentStep={step} onLogout={handleLogout}>
         <div className="exam-stage">
           <div>
-            <div className="exam-stage-eyebrow">Step 7 of 7</div>
-            <h1 className="exam-stage-title">Submitted</h1>
+            <div className="exam-stage-eyebrow">
+              {isFinishedExternally ? "Status" : "Step 7 of 7"}
+            </div>
+            <h1 className="exam-stage-title">{headline}</h1>
           </div>
-          <p className="exam-stage-body">
-            Your responses have been recorded. You may close this window.
-          </p>
+          <p className="exam-stage-body">{body}</p>
           <div className="exam-stage-cta">
             <button type="button" className="btn btn-ghost" onClick={handleLogout}>
               <LogOut size={14} /> Sign out

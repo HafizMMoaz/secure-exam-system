@@ -1,5 +1,5 @@
 """
-Pytest fixtures for PRD §27.8 integration tests.
+Pytest fixtures for PRD section 27.8 integration tests.
 """
 
 import os
@@ -34,6 +34,73 @@ def clean_db(db):
                 "logs", "exam_sessions"):
         db[col].delete_many({})
     yield
+
+
+def _reseed_demo(db):
+    """
+    Tests wipe the shared dev database between cases. Without this, running
+    pytest leaves the dev login broken (teach_demo / stud_demo gone).
+    Re-create the demo users + their exam at session teardown so the app
+    stays usable straight after the suite.
+    """
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+
+    teacher_id = ObjectId()
+    student_id = ObjectId()
+    student2_id = ObjectId()
+
+    def h(pw):
+        return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
+
+    db.users.insert_many([
+        {"_id": teacher_id, "username": "teach_demo", "password_hash": h("demo_pass"),
+         "role": "teacher", "is_active": True, "created_at": now},
+        {"_id": student_id, "username": "stud_demo", "password_hash": h("demo_pass"),
+         "role": "student", "is_active": True, "created_at": now},
+        {"_id": student2_id, "username": "stud_alice", "password_hash": h("demo_pass"),
+         "role": "student", "is_active": True, "created_at": now},
+    ])
+
+    exam_id = ObjectId()
+    db.exams.insert_one({
+        "_id": exam_id,
+        "title": "Demo Exam — Math",
+        "description": "Walkthrough exam for the final viva",
+        "duration_minutes": 30,
+        "created_by": str(teacher_id),
+        "teacher_id": str(teacher_id),
+        "state": "ACTIVATION_VALID",
+        "total_questions": 3,
+        "total_marks": 30,
+        "students_count": 2,
+        "max_students": 10,
+        "starts_at": now,
+        "ends_at": now + timedelta(hours=2),
+        "created_at": now,
+        "enrolled_students": [
+            {"student_id": str(student_id), "approved": True, "joined_at": now,
+             "approved_at": now, "approved_by": str(teacher_id)},
+            {"student_id": str(student2_id), "approved": True, "joined_at": now,
+             "approved_at": now, "approved_by": str(teacher_id)},
+        ],
+    })
+    db.activation_codes.insert_one({
+        "exam_id": str(exam_id),
+        "code": "DEMO123",
+        "used": False,
+        "expires_at": now + timedelta(hours=2),
+        "created_at": now,
+    })
+
+
+@pytest.fixture(scope="session", autouse=True)
+def reseed_demo_on_teardown(db):
+    yield
+    try:
+        _reseed_demo(db)
+    except Exception as exc:
+        print(f"[conftest] reseed_demo failed: {exc}")
 
 
 def _mint(payload, expiry_seconds=600):

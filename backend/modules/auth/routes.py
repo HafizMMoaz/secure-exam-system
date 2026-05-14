@@ -111,8 +111,8 @@ def login_route():
 @validate_body
 def otp_request_route():
     """
-    Step 1 of MFA — verify password and issue a one-time code. The code
-    is delivered through the §27.3 logging gateway in dev mode.
+    Step 1 of MFA - verify password and issue a one-time code. The code
+    is delivered through the section 27.3 logging gateway in dev mode.
     ---
     tags:
       - Auth
@@ -145,7 +145,7 @@ def otp_request_route():
 @validate_body
 def otp_verify_route():
     """
-    Step 2 of MFA — submit the OTP and receive a JWT.
+    Step 2 of MFA - submit the OTP and receive a JWT.
     ---
     tags:
       - Auth
@@ -200,7 +200,7 @@ def profile_route():
 @jwt_required
 def exam_state_transition_route(exam_id):
     """
-    Central state-transition endpoint (PRD §27.6 strict). Module 1 owns
+    Central state-transition endpoint (PRD section 27.6 strict). Module 1 owns
     every write to exams_col.state. Other modules call this instead of
     writing the collection directly.
     ---
@@ -252,7 +252,7 @@ def exam_state_transition_route(exam_id):
 @jwt_required
 def user_active_route(user_id):
     """
-    Central is_active writer (PRD §27.6 strict). Module 5 (RBAC) calls
+    Central is_active writer (PRD section 27.6 strict). Module 5 (RBAC) calls
     this when an admin toggles a user account.
     ---
     tags:

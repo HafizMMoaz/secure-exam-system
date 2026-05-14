@@ -19,6 +19,79 @@ from exceptions import (
 )
 
 
+def _exam_is_complete_by_quorum(exam_id):
+    """
+    Early-finalization rule (in addition to end_time):
+      Only treat the exam as fully done if the enrollment cap has been
+      reached (no more students can join) AND every approved student has
+      submitted. Without the cap check, a single submitter would close
+      an exam that still had seats - locking out late enrolees.
+
+    If the cap isn't reached, the exam stays IN_PROGRESS and end_time
+    becomes the only finalizer (via the auto_submit job).
+    """
+    try:
+        exam = exams_col.find_one({"_id": ObjectId(exam_id)})
+    except Exception:
+        return False
+    if not exam:
+        return False
+
+    max_students = int(exam.get("max_students", 0) or 0)
+    students_count = int(exam.get("students_count", 0) or 0)
+    if max_students <= 0 or students_count < max_students:
+        return False
+
+    approved_ids = [
+        s.get("student_id")
+        for s in (exam.get("students") or [])
+        if s.get("approved") and s.get("student_id")
+    ]
+    if not approved_ids:
+        return False
+    submitted = exam_sessions_col.count_documents({
+        "exam_id": str(exam_id),
+        "student_id": {"$in": approved_ids},
+        "submitted_at": {"$ne": None},
+    })
+    return submitted >= len(approved_ids)
+
+
+def _finalize_exam(exam_id, auth_header):
+    """
+    Flip the exam to SUBMITTED and kick off risk compute. Idempotent -
+    if the exam is already past SUBMITTED, the state writer treats the
+    repeat as a no-op.
+    """
+    try:
+        transition_exam_state(
+            exam_id,
+            ExamState.SUBMITTED.value,
+            auth_header,
+            ModuleName.TIMER.value,
+        )
+    except Exception:
+        # Already past SUBMITTED - fine, fall through to risk compute.
+        pass
+
+    import threading
+
+    def _auto_risk():
+        try:
+            from modules.risk.service import compute_exam_risk
+            compute_exam_risk(
+                user_context={"role": "system", "user_id": "system_timer"},
+                exam_id=exam_id,
+                auth_header=auth_header,
+                system_actor=True,
+            )
+        except Exception as exc:
+            _send_log(LogLevel.WARNING.value, "system", "auto_risk_failed",
+                      {"exam_id": exam_id, "error": str(exc)})
+
+    threading.Thread(target=_auto_risk, daemon=True).start()
+
+
 def _iso(dt):
     if dt is None:
         return None
@@ -114,7 +187,7 @@ def start_exam(user_context, payload, auth_header=""):
     except PyMongoError as exc:
         raise DatabaseException(str(exc))
 
-    # §27.6 (strict): state transition routed through Module 1.
+    # section 27.6 (strict): state transition routed through Module 1.
     transition_exam_state(
         exam_id,
         ExamState.IN_PROGRESS.value,
@@ -149,8 +222,8 @@ def status(user_context, exam_id):
     if not session:
         raise ExamStateException("Exam not started")
 
-    end_time = session.get("end_time")
-    remaining_seconds = int((end_time - now()).total_seconds())
+    end_time = _normalize_dt(session.get("end_time"))
+    remaining_seconds = int((end_time - now()).total_seconds()) if end_time else 0
 
     if remaining_seconds <= 0:
         # expire the session if still active
@@ -186,8 +259,10 @@ def submit_exam(user_context, payload, auth_header=""):
     if not session:
         raise ExamStateException("Exam not started")
 
-    end_time = session.get("end_time")
-    if now() > end_time:
+    # Mongo stores datetimes naive; normalize to the configured TZ before
+    # comparing with `now()` (which is TZ-aware).
+    end_time = _normalize_dt(session.get("end_time"))
+    if end_time and now() > end_time:
         raise ExamStateException("Exam time has expired")
 
     if session.get("submitted_at") is not None:
@@ -198,15 +273,19 @@ def submit_exam(user_context, payload, auth_header=""):
     except PyMongoError as exc:
         raise DatabaseException(str(exc))
 
-    # §27.6 (strict): state transition routed through Module 1.
-    transition_exam_state(
-        exam_id,
-        ExamState.SUBMITTED.value,
-        auth_header,
-        ModuleName.TIMER.value,
-    )
-
     _send_log(LogLevel.INFO.value, user_id, "exam_submitted", {"exam_id": exam_id, "student_id": user_id})
+
+    # IMPORTANT - the exam stays IN_PROGRESS unless the enrollment cap is
+    # full AND every approved student has submitted. Otherwise end_time
+    # is the only finalizer (via the auto_submit job). This stops a
+    # single submitter from prematurely closing an exam that still has
+    # open seats.
+    try:
+        if _exam_is_complete_by_quorum(exam_id):
+            _finalize_exam(exam_id, auth_header)
+    except Exception as exc:
+        _send_log(LogLevel.WARNING.value, "system", "finalize_check_failed",
+                  {"exam_id": exam_id, "error": str(exc)})
 
     return {"exam_id": exam_id, "submitted_at": _iso(now())}
 

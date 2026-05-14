@@ -1,18 +1,8 @@
 import { useState, type FormEvent } from "react"
 import { useNavigate } from "react-router-dom"
-import axios from "axios"
 import { ShieldCheck } from "lucide-react"
 import client from "../api/client"
-
-function getErrorMessage(error: unknown) {
-  if (axios.isAxiosError(error)) {
-    const responseMessage = error.response?.data?.message
-    if (typeof responseMessage === "string" && responseMessage.length > 0) {
-      return responseMessage
-    }
-  }
-  return "Registration failed"
-}
+import { getErrorMessage } from "../api/errors"
 
 export default function Register() {
   const navigate = useNavigate()

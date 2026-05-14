@@ -1244,12 +1244,106 @@ tbody tr:hover { background: var(--surface-2); }
 .timer-value.orange { color: var(--risk-med); }
 .timer-value.red { color: var(--risk-high); }
 
-@media (max-width: 880px) {
-  .app-shell { grid-template-columns: 1fr; }
-  .sidebar { display: none; }
-  .main { padding: 20px 16px; }
+/* ============================================================
+ * Responsive utilities
+ * Tiered breakpoints:
+ *   1024px — laptops: slim down sidebar + topbar paddings
+ *    768px — tablets / small laptops: sidebar becomes a drawer
+ *    560px — phones: stack form rows, drop ornamental text
+ * ============================================================ */
+
+/* Off-canvas drawer chrome (only used when .sidebar.open is set). */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 57px 0 0 0;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 25;
+}
+
+.sidebar-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-right: 4px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+  padding: 0;
+}
+
+.sidebar-toggle:hover { background: var(--surface-2); color: var(--ink); }
+
+/* Form-row helpers used by Dashboard create/edit modals. */
+.form-grid-2,
+.form-grid-3 {
+  display: grid;
+  gap: 12px;
+}
+.form-grid-2 { grid-template-columns: 1fr 1fr; }
+.form-grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+
+@media (max-width: 1024px) {
+  .app-shell { grid-template-columns: 220px minmax(0, 1fr); }
+  .main { padding: 28px 28px 64px; }
+}
+
+@media (max-width: 768px) {
+  /* Topbar: free up room by hiding the exam-title block. */
+  .topbar { padding: 10px 16px; gap: 10px; }
+  .topbar-context .exam-title { max-width: 18ch; }
+  .topbar-brand { font-size: 0.875rem; }
+
+  /* Sidebar becomes a left drawer. Closed by default; opens via
+     `.sidebar.open` toggled from React state. */
+  .sidebar-toggle { display: inline-flex; }
+  .app-shell { grid-template-columns: minmax(0, 1fr); }
+  .sidebar {
+    position: fixed;
+    top: 57px;
+    left: 0;
+    height: calc(100vh - 57px);
+    width: 260px;
+    transform: translateX(-100%);
+    transition: transform 0.18s ease;
+    z-index: 30;
+    box-shadow: 4px 0 24px rgba(15, 23, 42, 0.12);
+  }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar.open + .sidebar-backdrop,
+  .sidebar-backdrop.open { display: block; }
+
+  .main { padding: 20px 16px 56px; }
+  .page-header { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .page-header .page-title { font-size: 1.5rem; }
+
+  /* Student in-progress shell stacks rail above answer. */
   .in-progress-shell { grid-template-columns: 1fr; }
-  .question-rail { border-right: none; border-bottom: 1px solid var(--rule); }
+  .question-rail {
+    border-right: none;
+    border-bottom: 1px solid var(--rule);
+    max-height: 180px;
+    overflow-y: auto;
+  }
   .answer-pane { padding: 24px 16px; }
+
   .stats-grid { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 560px) {
+  .topbar-context { display: none; }
+  .topbar-right .live-pill { display: none; }
+  .main { padding: 16px 12px 48px; }
+
+  .stats-grid { grid-template-columns: 1fr; }
+  .form-grid-2,
+  .form-grid-3 { grid-template-columns: 1fr; }
+
+  /* Tables overflow horizontally rather than mangle column widths. */
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .table-wrap table { min-width: 480px; }
 }

@@ -47,3 +47,17 @@ otp_codes_col = db["otp_codes"]
 def now():
 	"""Return current datetime in the configured app timezone."""
 	return datetime.now(APP_TZ)
+
+
+def iso_utc_z(value=None):
+	"""
+	Single source of truth for ISO-8601 timestamps in API/log payloads.
+
+	Produces strict ISO-8601 UTC with a trailing Z (e.g. 2026-05-14T12:43:35Z).
+	Earlier code paths used `now().isoformat() + "Z"`, which emitted a malformed
+	`+05:00Z` when APP_TZ wasn't UTC and broke `new Date(...)` on the frontend.
+	"""
+	dt = value if value is not None else now()
+	if dt.tzinfo is None:
+		dt = APP_TZ.localize(dt)
+	return dt.astimezone(pytz.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")

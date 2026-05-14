@@ -1,4 +1,4 @@
-# §27.6 (strict): Module 6 owns exam content fields (title, duration, totals,
+# section 27.6 (strict): Module 6 owns exam content fields (title, duration, totals,
 # enrollment list), all question CRUD, and response writes (`answer_text`,
 # `time_taken_seconds`, edit counts). State-field writes go to Module 1 via
 # `PUT /api/auth/exam/state/<id>` through middleware/state_client.py.
@@ -11,8 +11,9 @@ from bson import ObjectId
 from pymongo.errors import PyMongoError
 from pytz import utc
 
-from config.config import questions_col, exams_col, responses_col, devices_col, BASE_URL, now
+from config.config import questions_col, exams_col, responses_col, devices_col, BASE_URL, now, iso_utc_z
 from middleware.state_client import transition_exam_state
+from middleware.socketio_app import emit_monitoring_event
 from enums.module_name import ModuleName
 from enums.log_level import LogLevel
 from enums.exam_state import ExamState
@@ -29,7 +30,7 @@ from exceptions import (
 def _iso_dt(value):
     if value is None:
         return None
-    return value.replace(microsecond=0).isoformat() + "Z"
+    return iso_utc_z(value)
 
 
 def _send_log(level, user_id, action, details):
@@ -164,6 +165,11 @@ def create_exam(user_context, payload):
     }
 
 
+def _approved_count(exam):
+    """How many students have been teacher-approved for this exam."""
+    return sum(1 for s in (exam.get("students") or []) if s.get("approved"))
+
+
 def list_exams(user_context):
     try:
         cursor = exams_col.find({"created_by": (user_context or {}).get("user_id")}).sort("created_at", -1)
@@ -177,6 +183,7 @@ def list_exams(user_context):
                     "duration_minutes": exam.get("duration_minutes", 0),
                     "max_students": exam.get("max_students", 30),
                     "students_count": exam.get("students_count", 0),
+                    "approved_count": _approved_count(exam),
                     "start_time": _serialize_dt(exam.get("start_time")),
                     "end_time": _serialize_dt(exam.get("end_time")),
                     "state": exam.get("state"),
@@ -198,6 +205,7 @@ def get_exam(exam_id):
         "duration_minutes": exam.get("duration_minutes", 0),
         "max_students": exam.get("max_students", 30),
         "students_count": exam.get("students_count", 0),
+        "approved_count": _approved_count(exam),
         "total_questions": exam.get("total_questions", 0),
         "total_marks": exam.get("total_marks", 0),
         "start_time": _serialize_dt(exam.get("start_time")),
@@ -220,6 +228,7 @@ def get_exam_public(exam_id):
         "end_time": _serialize_dt(exam.get("end_time")),
         "max_students": exam.get("max_students", 30),
         "students_count": exam.get("students_count", 0),
+        "approved_count": _approved_count(exam),
         "total_questions": exam.get("total_questions", 0),
         "total_marks": exam.get("total_marks", 0),
     }
@@ -243,9 +252,9 @@ def approve_exam(user_context, payload, auth_header=""):
     if count == 0:
         raise BadRequestException("Cannot approve exam with no questions. Add at least one question first.")
 
-    # §27.6 (strict): state transitions routed through Module 1.
+    # section 27.6 (strict): state transitions routed through Module 1.
     # If the exam was created and never advanced, traverse the missing
-    # DEVICE_VERIFIED step first — teacher approval is the moment the
+    # DEVICE_VERIFIED step first - teacher approval is the moment the
     # teacher attests that students will be device-verified at exam time.
     if current_state == ExamState.NOT_STARTED.value:
         transition_exam_state(
@@ -333,6 +342,14 @@ def enroll_student(user_context, exam_id, auth_header=""):
     except PyMongoError as exc:
         raise DatabaseException(str(exc))
 
+    # Realtime: tell the teacher dashboard a new student has joined so
+    # the Students Joined table refreshes without a manual click.
+    emit_monitoring_event(
+        str(exam.get("_id")),
+        "students_changed",
+        {"exam_id": str(exam.get("_id")), "reason": "enrolled", "user_id": student_id},
+    )
+
     return {
         "already_enrolled": False,
         "exam_id": str(exam.get("_id")),
@@ -396,6 +413,12 @@ def create_question(user_context, payload):
 
     if not exam:
         raise ExamNotFoundException()
+
+    if not _is_teacher_exam_owner(user_context, exam):
+        raise ForbiddenException("You are not allowed to add questions to this exam")
+
+    if exam.get("state") != ExamState.NOT_STARTED.value:
+        raise ExamStateException("Cannot add questions once the exam has been approved")
 
     try:
         order_index = questions_col.count_documents({"exam_id": exam_id}) + 1
@@ -727,6 +750,9 @@ def update_question(user_context, question_id, payload):
     if not _is_teacher_exam_owner(user_context, exam):
         raise ForbiddenException("You are not allowed to edit this question")
 
+    if exam.get("state") != ExamState.NOT_STARTED.value:
+        raise ExamStateException("Cannot edit questions once the exam has been approved")
+
     updates = {}
 
     text = (payload or {}).get("text")
@@ -818,6 +844,9 @@ def delete_question(user_context, question_id):
     if not _is_teacher_exam_owner(user_context, exam):
         raise ForbiddenException("You are not allowed to delete this question")
 
+    if exam.get("state") != ExamState.NOT_STARTED.value:
+        raise ExamStateException("Cannot delete questions once the exam has been approved")
+
     try:
         questions_col.delete_one({"_id": question.get("_id")})
         responses_col.delete_many({"question_id": question_id})
@@ -867,6 +896,12 @@ def approve_student(user_context, payload):
 
     _send_log(LogLevel.INFO.value, (user_context or {}).get("user_id"), "student_approved", {"exam_id": exam_id, "student_id": student_id})
 
+    emit_monitoring_event(
+        str(exam.get("_id")),
+        "students_changed",
+        {"exam_id": str(exam.get("_id")), "reason": "approved", "user_id": student_id},
+    )
+
     return {"exam_id": exam_id, "student_id": student_id, "approved": True}
 
 
@@ -875,23 +910,172 @@ def get_exam_students(user_context, exam_id):
         raise BadRequestException("exam_id is required")
 
     exam = _get_exam(str(exam_id).strip())
-    
+
     if not _is_teacher_exam_owner(user_context, exam):
         raise ForbiddenException("You are not allowed to view students for this exam")
 
     students = exam.get("students", []) or []
+
+    # Resolve student_id -> username in one batched query so the UI shows
+    # human names instead of leaking internal Mongo identifiers.
+    from config.config import users_col
+    student_ids = [s.get("student_id") for s in students if s.get("student_id")]
+    object_ids = []
+    for sid in student_ids:
+        try:
+            object_ids.append(ObjectId(sid))
+        except Exception:
+            pass
+    username_map = {}
+    if object_ids:
+        for user_doc in users_col.find({"_id": {"$in": object_ids}}, {"username": 1}):
+            username_map[str(user_doc["_id"])] = user_doc.get("username", "")
+
     result = []
-    
     for student in students:
+        sid = student.get("student_id")
         result.append({
-            "student_id": student.get("student_id"),
+            "student_id": sid,
+            "username": username_map.get(sid) or "Deleted user",
             "joined_at": _serialize_dt(student.get("joined_at")),
             "approved": student.get("approved", False),
             "approved_at": _serialize_dt(student.get("approved_at")),
             "approved_by": student.get("approved_by"),
+            "activated_at": _serialize_dt(student.get("activated_at")),
         })
-    
+
     return {"exam_id": exam_id, "students": result, "count": len(result)}
+
+
+def get_exam_results(user_context, exam_id):
+    """
+    Per-student results for a finished exam.
+
+    Marks model (variable-mark-aware):
+      mcq_score              = sum of marks for correctly answered MCQs.
+      negative_penalty       = NEG_FACTOR (25%) * marks of each WRONG MCQ.
+                               Scales naturally with each question's marks.
+      risk_score             = 0..10 from Module 17 (cohort risk dashboard).
+      risk_penalty           = mcq_score * (risk_score / 10) * RISK_MAX_FRAC.
+                               Expressed as a fraction of marks EARNED so
+                               the impact is proportional regardless of
+                               whether every MCQ is worth 1 or 10. At full
+                               10/10 risk a student loses RISK_MAX_FRAC
+                               (50%) of what they scored.
+      final_score            = max(0, mcq_score - negative_penalty - risk_penalty)
+
+    Text/essay questions cannot be auto-graded and are reported as
+    `text_pending_review` so the teacher knows what's left to mark.
+    """
+    if not exam_id:
+        raise BadRequestException("exam_id is required")
+
+    exam = _get_exam(str(exam_id).strip())
+    if not _is_teacher_exam_owner(user_context, exam):
+        raise ForbiddenException("You are not allowed to view results for this exam")
+
+    questions = list(questions_col.find({"exam_id": exam_id}))
+    mcq_qs = [q for q in questions if q.get("question_type") == "mcq"]
+    text_qs = [q for q in questions if q.get("question_type") == "text"]
+
+    mcq_total_marks = sum(int(q.get("marks", 0)) for q in mcq_qs)
+    text_total_marks = sum(int(q.get("marks", 0)) for q in text_qs)
+    exam_total_marks = mcq_total_marks + text_total_marks
+
+    NEG_FACTOR = 0.25       # negative-marking per wrong MCQ
+    RISK_MAX_FRAC = 0.5     # at 10/10 risk, deduct 50% of marks earned
+
+    students = exam.get("students", []) or []
+    student_ids = [s.get("student_id") for s in students if s.get("student_id")]
+
+    # Batch resolve usernames + risk scores so the CSV reads like English.
+    from config.config import users_col, risk_scores_col
+    object_ids = []
+    for sid in student_ids:
+        try:
+            object_ids.append(ObjectId(sid))
+        except Exception:
+            pass
+    username_map = {}
+    if object_ids:
+        for udoc in users_col.find({"_id": {"$in": object_ids}}, {"username": 1}):
+            username_map[str(udoc["_id"])] = udoc.get("username", "")
+
+    # Pick the most recent risk score per student in this exam.
+    risk_map = {}
+    for rdoc in risk_scores_col.find(
+        {"exam_id": str(exam_id), "student_id": {"$in": student_ids}}
+    ).sort("computed_at", -1):
+        sid = rdoc.get("student_id")
+        if sid not in risk_map:
+            risk_map[sid] = float(rdoc.get("score", 0))
+
+    rows = []
+    for sid in student_ids:
+        responses = list(responses_col.find({"exam_id": exam_id, "student_id": sid}))
+        resp_by_q = {str(r.get("question_id")): r for r in responses}
+
+        mcq_correct = 0
+        mcq_wrong = 0
+        mcq_unanswered = 0
+        mcq_score = 0
+        for q in mcq_qs:
+            qid = str(q.get("_id"))
+            marks = int(q.get("marks", 0))
+            r = resp_by_q.get(qid)
+            if not r or not r.get("answer_text"):
+                mcq_unanswered += 1
+                continue
+            if r.get("answer_text") == q.get("correct_answer"):
+                mcq_correct += 1
+                mcq_score += marks
+            else:
+                mcq_wrong += 1
+
+        text_pending = sum(
+            1 for q in text_qs
+            if resp_by_q.get(str(q.get("_id"))) and resp_by_q[str(q.get("_id"))].get("answer_text")
+        )
+
+        negative_penalty = round(sum(
+            int(q.get("marks", 0)) * NEG_FACTOR
+            for q in mcq_qs
+            if resp_by_q.get(str(q.get("_id")))
+            and resp_by_q[str(q.get("_id"))].get("answer_text")
+            and resp_by_q[str(q.get("_id"))].get("answer_text") != q.get("correct_answer")
+        ), 2)
+
+        risk_score = risk_map.get(sid, 0.0)
+        risk_penalty = round(mcq_score * (risk_score / 10.0) * RISK_MAX_FRAC, 2)
+
+        final_score = round(max(0, mcq_score - negative_penalty - risk_penalty), 2)
+
+        rows.append({
+            "student_id": sid,
+            "username": username_map.get(sid) or "Deleted user",
+            "mcq_correct": mcq_correct,
+            "mcq_wrong": mcq_wrong,
+            "mcq_unanswered": mcq_unanswered,
+            "mcq_score": mcq_score,
+            "mcq_total": mcq_total_marks,
+            "text_pending_review": text_pending,
+            "text_total": text_total_marks,
+            "negative_penalty": negative_penalty,
+            "risk_score": round(risk_score, 2),
+            "risk_penalty": risk_penalty,
+            "final_score": final_score,
+            "exam_total": exam_total_marks,
+        })
+
+    rows.sort(key=lambda r: r["final_score"], reverse=True)
+    return {
+        "exam_id": exam_id,
+        "exam_title": exam.get("title", ""),
+        "total_marks": exam_total_marks,
+        "negative_marking_factor": NEG_FACTOR,
+        "risk_max_penalty_fraction": RISK_MAX_FRAC,
+        "students": rows,
+    }
 
 
 def get_health():

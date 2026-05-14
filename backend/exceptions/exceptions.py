@@ -15,7 +15,7 @@ Usage:
 
 
 class SecureExamBaseException(Exception):
-    """Base exception — all custom exceptions inherit from this."""
+    """Base exception - all custom exceptions inherit from this."""
     status_code = 500
     default_message = "An unexpected error occurred"
 
@@ -98,7 +98,7 @@ class SessionNotFoundException(NotFoundException):
 
 # ── 409 Conflict ──────────────────────────────────────────────────────────────
 class ConflictException(SecureExamBaseException):
-    """State violation — e.g. exam already submitted."""
+    """State violation - e.g. exam already submitted."""
     status_code = 409
     default_message = "Conflict — state violation"
 
@@ -125,9 +125,9 @@ class ExamStateException(ConflictException):
     Action attempted in wrong exam state.
     e.g. submitting answers when state is not IN_PROGRESS.
     
-    Valid states: NOT_STARTED → DEVICE_VERIFIED → TEACHER_APPROVED
-                  → ACTIVATION_VALID → IN_PROGRESS → SUBMITTED
-                  → ANALYZING → COMPLETED
+    Valid states: NOT_STARTED -> DEVICE_VERIFIED -> TEACHER_APPROVED
+                  -> ACTIVATION_VALID -> IN_PROGRESS -> SUBMITTED
+                  -> ANALYZING -> COMPLETED
     """
     default_message = "Action not allowed in current exam state"
 

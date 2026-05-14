@@ -81,7 +81,7 @@ def record_heartbeat(user_context, payload):
     except PyMongoError as exc:
         raise DatabaseException(str(exc))
 
-    # §24 bonus: push to WebSocket subscribers of this exam's room.
+    # section 24 bonus: push to WebSocket subscribers of this exam's room.
     from middleware.socketio_app import emit_monitoring_event
     emit_monitoring_event(exam_id, "activity_event", {
         "user_id": user_id, "exam_id": exam_id,

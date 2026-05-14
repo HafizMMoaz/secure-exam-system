@@ -46,7 +46,9 @@ def profile():
 
 
 def exam_state(exam_id):
-    data = get_exam_state(exam_id)
+    user_context = getattr(request, "user", {}) or {}
+    requester_id = user_context.get("user_id") if user_context.get("role") == "student" else None
+    data = get_exam_state(exam_id, requester_id=requester_id)
     return success_response(data=data, message="")
 
 

@@ -1,6 +1,6 @@
 import secrets
 from datetime import timedelta
-from config.config import now
+from config.config import now, iso_utc_z
 from uuid import uuid4
 
 import bcrypt
@@ -45,7 +45,7 @@ def _validate_required_fields(payload, required_fields):
 
 def _serialize_created_at(created_at):
     if isinstance(created_at, type(now())):
-        return created_at.replace(microsecond=0).isoformat() + "Z"
+        return iso_utc_z(created_at)
     return created_at
 
 
@@ -138,7 +138,7 @@ def get_profile(user_id):
     }
 
 
-def get_exam_state(exam_id):
+def get_exam_state(exam_id, requester_id=None):
     try:
         exam = exams_col.find_one({"_id": ObjectId(exam_id)})
     except (InvalidId, TypeError):
@@ -149,17 +149,30 @@ def get_exam_state(exam_id):
     if not exam:
         raise ExamNotFoundException()
 
-    return {
+    result = {
         "exam_id": str(exam["_id"]),
         "state": exam.get("state"),
     }
+    # If a student is asking, include their own enrollment status so the
+    # waiting screen can route them at the right moment without exposing
+    # other students' data.
+    if requester_id:
+        entry = next(
+            (s for s in (exam.get("students") or []) if s.get("student_id") == requester_id),
+            None,
+        )
+        if entry is not None:
+            result["student_enrolled"] = True
+            result["student_approved"] = bool(entry.get("approved"))
+            result["student_activated"] = entry.get("activated_at") is not None
+    return result
 
 
 def set_exam_state(user_context, exam_id, payload):
     """
-    PRD §27.6 strict path: Module 1 is the sole writer of exams_col.state.
+    PRD section 27.6 strict path: Module 1 is the sole writer of exams_col.state.
     Every other module performs state transitions by POSTing here. Module 1
-    validates that the requested transition is allowed by the §27.4 state
+    validates that the requested transition is allowed by the section 27.4 state
     machine (immediate-next-step rule, except idempotent same-state writes
     which are accepted but no-op).
     """
@@ -236,7 +249,7 @@ def _send_state_log(user_context, exam_id, prev, target, actor_module):
         "exam_id": exam_id,
         "action": "exam_state_transition",
         "details": {"from": prev, "to": target, "actor_module": actor_module},
-        "timestamp": now().replace(microsecond=0).isoformat() + "Z",
+        "timestamp": iso_utc_z(),
     }
     try:
         requests.post(f"{BASE_URL}/api/logs/write", json=payload, timeout=2)
@@ -246,9 +259,9 @@ def _send_state_log(user_context, exam_id, prev, target, actor_module):
 
 def set_user_active(actor_context, user_id, payload):
     """
-    PRD §27.6 strict path: Module 1 is the sole writer of users_col fields,
-    including is_active. Module 5 (RBAC) is the policy authority — it
-    decides who gets toggled — and calls this endpoint to actually mutate.
+    PRD section 27.6 strict path: Module 1 is the sole writer of users_col fields,
+    including is_active. Module 5 (RBAC) is the policy authority - it
+    decides who gets toggled - and calls this endpoint to actually mutate.
     """
     if (actor_context or {}).get("role") != "teacher":
         from exceptions import ForbiddenException
@@ -279,7 +292,7 @@ def set_user_active(actor_context, user_id, payload):
         "exam_id": "",
         "action": "user_active_toggled",
         "details": {"target_user_id": user_id, "is_active": new_value},
-        "timestamp": now().replace(microsecond=0).isoformat() + "Z",
+        "timestamp": iso_utc_z(),
     }
     try:
         requests.post(f"{BASE_URL}/api/logs/write", json=payload_log, timeout=2)
@@ -306,7 +319,7 @@ def _issue_token(user):
 
 def _emit_otp_log(user_id, action, details, level=None):
     """
-    OTP delivery channel for dev: emit the code through the §27.3 logging
+    OTP delivery channel for dev: emit the code through the section 27.3 logging
     gateway. A real deployment would replace this with SMS or email.
     """
     payload = {
@@ -316,7 +329,7 @@ def _emit_otp_log(user_id, action, details, level=None):
         "exam_id": "",
         "action": action,
         "details": details or {},
-        "timestamp": now().replace(microsecond=0).isoformat() + "Z",
+        "timestamp": iso_utc_z(),
     }
     try:
         requests.post(f"{BASE_URL}/api/logs/write", json=payload, timeout=2)
@@ -326,7 +339,7 @@ def _emit_otp_log(user_id, action, details, level=None):
 
 def request_otp(payload):
     """
-    Step 1 of MFA (PRD §11 Module 1). Verify credentials, generate a
+    Step 1 of MFA (PRD section 11 Module 1). Verify credentials, generate a
     6-digit OTP, store its hash with a 5-minute TTL, and emit the code
     through the logging gateway for dev-mode delivery. The plaintext
     code is *not* returned in the response.

@@ -52,7 +52,7 @@ SWAGGER_TEMPLATE = {
             "description": "Enter the token with the Bearer prefix: **Bearer &lt;your_jwt_token&gt;**"
         }
     },
-    # Applied globally — every endpoint requires JWT unless overridden
+    # Applied globally - every endpoint requires JWT unless overridden
     "security": [{"BearerAuth": []}],
     "consumes": ["application/json"],
     "produces": ["application/json"],
@@ -113,7 +113,7 @@ SWAGGER_TEMPLATE = {
         "Error500": {"$ref": "#/definitions/ErrorResponse"},
         "Error503": {"$ref": "#/definitions/ErrorResponse"},
     },
-    # ── Tags — one per module ──────────────────────────────────────────────────
+    # ── Tags - one per module ──────────────────────────────────────────────────
     "tags": [
         {"name": "Health",         "description": "System-wide health check"},
         {"name": "Auth",           "description": "Module 1 — Secure Authentication"},
