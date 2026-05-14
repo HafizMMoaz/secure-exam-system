@@ -9,7 +9,7 @@ from bson.errors import InvalidId
 from pymongo.errors import PyMongoError
 from pytz import utc
 
-from config.config import activation_codes_col, exams_col, BASE_URL, APP_TZ, now
+from config.config import activation_codes_col, exams_col, BASE_URL, APP_TZ, now, iso_utc_z
 from enums.exam_state import ExamState
 from enums.log_level import LogLevel
 from enums.module_name import ModuleName
@@ -25,7 +25,7 @@ from exceptions import (
 def _iso_dt(value):
     if value is None:
         return None
-    return value.replace(microsecond=0).isoformat() + "Z"
+    return iso_utc_z(value)
 
 
 def _normalize_dt(value):
@@ -70,7 +70,7 @@ def _send_log(level, action, exam_id, details=None, user_id=None):
         "exam_id": exam_id or "",
         "action": action,
         "details": details or {},
-        "timestamp": now().replace(microsecond=0).isoformat() + "Z",
+        "timestamp": iso_utc_z(),
     }
     try:
         requests.post(f"{BASE_URL}/api/logs/write", json=payload, timeout=2)
@@ -193,12 +193,104 @@ def validate_activation_code(user_context, payload):
         )
         raise BadRequestException("Activation code has expired")
 
+    requester_id = (user_context or {}).get("user_id")
+
     try:
-        # Don't mark as used - allow multiple students to use same code
-        # Just update the exam state to ACTIVATION_VALID
+        exam_doc = exams_col.find_one({"_id": ObjectId(exam_id)})
+        if not exam_doc:
+            raise ExamNotFoundException()
+
+        # Reject activation once the exam has moved into a terminal phase.
+        # Even with a still-unexpired code, accepting activation here would
+        # let an approved student walk into a SUBMITTED/ANALYZING/COMPLETED
+        # exam, which the rest of the system isn't set up to handle.
+        current_state = exam_doc.get("state")
+        if current_state in {
+            ExamState.SUBMITTED.value,
+            ExamState.ANALYZING.value,
+            ExamState.COMPLETED.value,
+        }:
+            _send_log(
+                LogLevel.WARNING.value,
+                "activation_after_close",
+                exam_id,
+                {"exam_id": exam_id, "state": current_state},
+                requester_id,
+            )
+            raise BadRequestException(
+                "This exam has already finished. Activation is no longer accepted."
+            )
+
+        # PRD section 14 workflow: teacher approval is step 3 and MUST gate
+        # step 4 (activation). Reject the code if this student hasn't been
+        # approved by the teacher for this exam, even if they hold a valid
+        # code.
+        enrolled = exam_doc.get("students", []) or []
+        student_entry = next(
+            (s for s in enrolled if s.get("student_id") == requester_id),
+            None,
+        )
+        if not student_entry:
+            _send_log(
+                LogLevel.SECURITY.value,
+                "activation_without_enrollment",
+                exam_id,
+                {"exam_id": exam_id},
+                requester_id,
+            )
+            raise BadRequestException("You haven't enrolled in this exam yet.")
+        if not student_entry.get("approved"):
+            _send_log(
+                LogLevel.SECURITY.value,
+                "activation_before_teacher_approval",
+                exam_id,
+                {"exam_id": exam_id},
+                requester_id,
+            )
+            raise BadRequestException(
+                "Your teacher hasn't approved you for this exam yet. Please wait."
+            )
+
+        # PRD section 11 Module 4 - "One-time tokens". Each student may
+        # successfully validate the code at most ONCE. Done atomically so
+        # two concurrent requests can't both pass the reuse check before
+        # either records the redemption: $addToSet with a $ne predicate on
+        # used_by_students. Only one of the racing updates will modify a
+        # document; the other gets matched_count == 0.
+        claim = activation_codes_col.update_one(
+            {
+                "_id": activation.get("_id"),
+                "used_by_students": {"$ne": requester_id},
+            },
+            {
+                "$addToSet": {"used_by_students": requester_id},
+                "$set": {"last_used_at": now()},
+            },
+        )
+        if claim.modified_count == 0:
+            _send_log(
+                LogLevel.SECURITY.value,
+                "activation_code_reuse",
+                exam_id,
+                {"exam_id": exam_id},
+                requester_id,
+            )
+            raise BadRequestException(
+                "You've already used this activation code. Each student can only redeem it once."
+            )
+
+        # Transition the exam state TEACHER_APPROVED -> ACTIVATION_VALID
+        # (only on first activation). Subsequent students activating an
+        # in-progress exam don't regress the state machine.
+        if current_state == ExamState.TEACHER_APPROVED.value:
+            exams_col.update_one(
+                {"_id": ObjectId(exam_id)},
+                {"$set": {"state": ExamState.ACTIVATION_VALID.value}},
+            )
+        # Mark this student as activated on their enrolled_students entry.
         exams_col.update_one(
-            {"_id": ObjectId(exam_id)},
-            {"$set": {"state": ExamState.ACTIVATION_VALID.value}},
+            {"_id": ObjectId(exam_id), "students.student_id": requester_id},
+            {"$set": {"students.$.activated_at": now()}},
         )
     except (InvalidId, TypeError):
         raise ExamNotFoundException()

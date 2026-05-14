@@ -3,7 +3,7 @@ from enum import Enum
 
 class ModuleName(str, Enum):
     """
-    Official module names — used in log entries and health check responses
+    Official module names - used in log entries and health check responses
     to ensure consistency across all modules.
     """
     AUTH           = "Module_1_Auth"

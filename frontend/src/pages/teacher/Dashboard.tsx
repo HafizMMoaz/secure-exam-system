@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react"
-import axios from "axios"
 import { useNavigate } from "react-router-dom"
 import { io, type Socket } from "socket.io-client"
 import {
@@ -9,16 +8,20 @@ import {
   ScrollText,
   ShieldAlert,
   ShieldCheck,
-  Users,
   LogOut,
-  Radio,
   Activity,
   Clipboard,
   Eye,
   Zap,
   Gauge,
+  Copy,
+  Check,
+  Menu,
+  X,
+  Download,
 } from "lucide-react"
 import client from "../../api/client"
+import { getErrorMessage } from "../../api/errors"
 import { useAuth } from "../../hooks/useAuth"
 import type { ApiResponse, Exam, LogEntry, QuestionWithAnswer, RiskScore, StudentUser } from "../../types"
 
@@ -43,16 +46,6 @@ type LogsResponse = ApiResponse<{ logs?: LogEntry[] } | LogEntry[]>
 type RiskResponse = ApiResponse<{ students?: RiskScore[]; scores?: RiskScore[] } | RiskScore[]>
 type StudentsResponse = ApiResponse<{ users?: StudentUser[] } | StudentUser[]>
 
-function getErrorMessage(error: unknown) {
-  if (axios.isAxiosError(error)) {
-    const responseMessage = error.response?.data?.message
-    if (typeof responseMessage === "string" && responseMessage.length > 0) {
-      return responseMessage
-    }
-  }
-
-  return "Unable to complete the request"
-}
 
 function normalizeArray<T>(payload: unknown, keys: string[]): T[] {
   if (Array.isArray(payload)) {
@@ -70,6 +63,28 @@ function normalizeArray<T>(payload: unknown, keys: string[]): T[] {
   }
 
   return []
+}
+
+function CopyButton({ value, label }: { value: string; label?: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      className="btn-icon"
+      title={copied ? "Copied" : (label || "Copy")}
+      aria-label={label || "Copy"}
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(value)
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1500)
+        } catch {/* clipboard blocked */}
+      }}
+      style={{ color: copied ? "var(--accent)" : undefined }}
+    >
+      {copied ? <Check size={14} /> : <Copy size={14} />}
+    </button>
+  )
 }
 
 function humanizeAction(action: string): string {
@@ -101,6 +116,23 @@ function humanizeAction(action: string): string {
   }
   if (map[action]) return map[action]
   return action.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+// Translate raw PRD state names into something a teacher reads as English.
+// The backend state machine still uses the section 27.4 names - this only affects
+// what the user sees on the UI.
+function prettyExamState(state: string): string {
+  switch (state) {
+    case "NOT_STARTED": return "Draft"
+    case "DEVICE_VERIFIED": return "Draft"
+    case "TEACHER_APPROVED": return "Ready"
+    case "ACTIVATION_VALID": return "Ready"
+    case "IN_PROGRESS": return "Live"
+    case "SUBMITTED": return "Finalising"
+    case "ANALYZING": return "Finalising"
+    case "COMPLETED": return "Closed"
+    default: return state.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
+  }
 }
 
 function getStateBadgeClass(state: string) {
@@ -139,8 +171,8 @@ export default function Dashboard() {
   const navigate = useNavigate()
 
   const [tab, setTab] = useState<Tab>("exams")
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [examId, setExamId] = useState("")
-  const [examIdInput, setExamIdInput] = useState("")
   const [exams, setExams] = useState<Exam[]>([])
   const [newExamTitle, setNewExamTitle] = useState("")
   const [newExamDesc, setNewExamDesc] = useState("")
@@ -159,14 +191,28 @@ export default function Dashboard() {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [riskData, setRiskData] = useState<RiskScore[]>([])
   const [students, setStudents] = useState<StudentUser[]>([])
-  const [liveEvents, setLiveEvents] = useState<Array<{ kind: string; user_id?: string; timestamp?: string }>>([])
-  const [liveConnected, setLiveConnected] = useState(false)
-  const [logsLive, setLogsLive] = useState(false)
+  const [liveEvents, setLiveEvents] = useState<Array<{ kind: string; user_id?: string; username?: string; timestamp?: string }>>([])
   const logsSocketRef = useRef<Socket | null>(null)
-  const riskSocketRef = useRef<Socket | null>(null)
+  const examRoomSocketRef = useRef<Socket | null>(null)
+  // Mirror of the selected exam so the always-on log socket (which sets up
+  // once on mount) can filter events without re-subscribing on every change.
+  const examIdRef = useRef("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
+
+  // Auto-dismiss toasts so stale messages don't sit on screen forever
+  // (e.g. "Activation code loaded" hanging around for the entire session).
+  useEffect(() => {
+    if (!success) return
+    const t = window.setTimeout(() => setSuccess(""), 4000)
+    return () => window.clearTimeout(t)
+  }, [success])
+  useEffect(() => {
+    if (!error) return
+    const t = window.setTimeout(() => setError(""), 6000)
+    return () => window.clearTimeout(t)
+  }, [error])
   const [activationCode, setActivationCode] = useState("")
   const [examState, setExamState] = useState("")
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null)
@@ -194,11 +240,31 @@ export default function Dashboard() {
   const [deletingQuestionId, setDeletingQuestionId] = useState("")
   
   // Student approval state
-  const [examStudents, setExamStudents] = useState<Array<{ student_id: string; joined_at: string; approved: boolean; approved_at: string | null; approved_by: string | null }>>([])
+  const [examStudents, setExamStudents] = useState<Array<{ student_id: string; username?: string; joined_at: string; approved: boolean; approved_at: string | null; approved_by: string | null; activated_at?: string | null }>>([])
   const [approvingStudentId, setApprovingStudentId] = useState("")
+
+  // Sync the ref used by the always-on log socket to filter events to
+  // the currently-selected exam.
+  useEffect(() => {
+    examIdRef.current = examId
+  }, [examId])
 
   const highRiskCount = riskData.filter((item) => item.risk_level === "HIGH").length
   const canApproveExam = examState === "NOT_STARTED" || examState === "DEVICE_VERIFIED"
+  // Questions and exam metadata become read-only once the exam is approved
+  // - same gate the backend enforces on create/update/delete_question.
+  const canEditQuestions = examState === "NOT_STARTED" || !examState
+  const canShowActivationCode = ["TEACHER_APPROVED", "ACTIVATION_VALID", "IN_PROGRESS"].includes(examState)
+
+  // Update once every 30s so the "exam is over" gate (end_time-based)
+  // flips without requiring a refresh.
+  const [nowTs, setNowTs] = useState(() => Date.now())
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTs(Date.now()), 30_000)
+    return () => window.clearInterval(id)
+  }, [])
+  const endsAt = selectedExam?.end_time ? new Date(selectedExam.end_time).getTime() : 0
+  const examOver = examState === "COMPLETED" || (endsAt > 0 && nowTs > endsAt)
 
   const loadExams = async () => {
     setLoading(true)
@@ -233,6 +299,7 @@ export default function Dashboard() {
       setExamState(stateResponse.data.data.state)
       setSelectedExam(detailsResponse.data.data)
       setLogs(normalizeArray<LogEntry>(logsResponse.data.data, ["logs"]))
+      void loadExamStudents(targetExamId, { silent: true })
     } catch (overviewError) {
       setError(getErrorMessage(overviewError))
     } finally {
@@ -255,21 +322,8 @@ export default function Dashboard() {
     navigate("/login", { replace: true })
   }
 
-  const handleLoadExam = async () => {
-    const nextExamId = examIdInput.trim()
-    if (!nextExamId) {
-      setError("Enter an exam ID first")
-      return
-    }
-
-    setExamId(nextExamId)
-    setTab("overview")
-    await loadExamOverview(nextExamId)
-  }
-
   const handleSelectExam = async (exam: Exam) => {
     setExamId(exam.exam_id)
-    setExamIdInput(exam.exam_id)
     setTab("overview")
     await loadExamOverview(exam.exam_id)
   }
@@ -334,6 +388,7 @@ export default function Dashboard() {
         created_at: new Date().toISOString(),
         max_students: newExamMaxStudents,
         students_count: 0,
+        approved_count: 0,
         start_time: startTimeIso,
         end_time: endTimeIso,
         total_questions: 0,
@@ -511,63 +566,21 @@ export default function Dashboard() {
     }
   }
 
-  const handleRunRiskScoring = async () => {
-    if (!examId) {
-      setError("Select an exam first")
-      return
+  const loadRiskDashboard = async (targetExamId: string, opts?: { silent?: boolean }) => {
+    if (!targetExamId) return
+    const silent = opts?.silent
+    if (!silent) {
+      setLoading(true)
+      setError("")
+      setSuccess("")
     }
-
-    setLoading(true)
-    setError("")
-    setSuccess("")
-
     try {
-      await client.post(`/api/risk/compute/${examId}`)
-      setSuccess("Risk scoring completed")
-    } catch (riskError) {
-      setError(getErrorMessage(riskError))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleRefreshLogs = async () => {
-    if (!examId) {
-      setError("Select an exam first")
-      return
-    }
-
-    setLoading(true)
-    setError("")
-    setSuccess("")
-
-    try {
-      const response = await client.get<LogsResponse>("/api/logs/list", { params: { exam_id: examId } })
-      setLogs(normalizeArray<LogEntry>(response.data.data, ["logs"]))
-    } catch (logsError) {
-      setError(getErrorMessage(logsError))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleLoadRiskScores = async () => {
-    if (!examId) {
-      setError("Select an exam first")
-      return
-    }
-
-    setLoading(true)
-    setError("")
-    setSuccess("")
-
-    try {
-      const response = await client.get<RiskResponse>(`/api/risk/dashboard/${examId}`)
+      const response = await client.get<RiskResponse>(`/api/risk/dashboard/${targetExamId}`)
       setRiskData(normalizeArray<RiskScore>(response.data.data, ["students", "scores"]))
     } catch (riskLoadError) {
-      setError(getErrorMessage(riskLoadError))
+      if (!silent) setError(getErrorMessage(riskLoadError))
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
@@ -845,25 +858,19 @@ export default function Dashboard() {
     }
   }
 
-  const handleLoadExamStudents = async () => {
-    if (!examId) {
-      setError("Select an exam first")
-      return
-    }
-
-    setLoading(true)
-    setError("")
-    setSuccess("")
-
+  const loadExamStudents = async (targetExamId: string, opts?: { silent?: boolean }) => {
+    if (!targetExamId) return
+    const silent = opts?.silent
+    if (!silent) setLoading(true)
     try {
-      const response = await client.get<ApiResponse<{ students: Array<{ student_id: string; joined_at: string; approved: boolean; approved_at: string | null; approved_by: string | null }>; count: number }>>(
-        `/api/questions/exams/${examId}/students`
+      const response = await client.get<ApiResponse<{ students: Array<{ student_id: string; username?: string; joined_at: string; approved: boolean; approved_at: string | null; approved_by: string | null; activated_at?: string | null }>; count: number }>>(
+        `/api/questions/exams/${targetExamId}/students`
       )
       setExamStudents(response.data.data.students || [])
     } catch (studentsError) {
-      setError(getErrorMessage(studentsError))
+      if (!silent) setError(getErrorMessage(studentsError))
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
@@ -895,56 +902,20 @@ export default function Dashboard() {
     }
   }
 
-  // Real-time monitoring events on the Risk tab — subscribes to exam:<id>
-  // room over WebSocket whenever the Risk tab is open and an exam is loaded.
+  // Auto-load risk dashboard whenever the user opens the Risk tab with an
+  // exam selected. WebSocket updates from `risk_computed` keep it fresh
+  // after that - no manual refresh button.
   useEffect(() => {
-    if (tab !== "risk" || !examId) {
-      if (riskSocketRef.current) {
-        riskSocketRef.current.disconnect()
-        riskSocketRef.current = null
-        setLiveConnected(false)
-      }
-      return
-    }
-
-    const base = client.defaults.baseURL || window.location.origin
-    const socket = io(`${base}/monitoring`, {
-      transports: ["websocket", "polling"],
-      reconnection: true,
-    })
-    riskSocketRef.current = socket
-
-    socket.on("connect", () => socket.emit("subscribe", { exam_id: examId }))
-    socket.on("subscribed", () => setLiveConnected(true))
-    socket.on("disconnect", () => setLiveConnected(false))
-
-    const onEvent = (kind: string) => (data: { user_id?: string; timestamp?: string }) => {
-      setLiveEvents((prev) => [{ kind, user_id: data.user_id, timestamp: data.timestamp }, ...prev].slice(0, 50))
-    }
-    socket.on("tab_event", onEvent("tab_event"))
-    socket.on("clipboard_event", onEvent("clipboard_event"))
-    socket.on("activity_event", onEvent("activity_event"))
-    socket.on("behavioral_event", onEvent("behavioral_event"))
-
-    return () => {
-      socket.disconnect()
-      riskSocketRef.current = null
-      setLiveConnected(false)
+    if (tab === "risk" && examId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void loadRiskDashboard(examId, { silent: true })
     }
   }, [tab, examId])
 
-  // Real-time audit logs over WebSocket. Subscribes only while the logs tab is
-  // mounted; tears down on leave or unmount.
+  // Always-on audit log stream. Connects when the dashboard mounts and
+  // stays connected regardless of which tab is active - logs accumulate
+  // in the background so the Activity tab is fresh the moment you open it.
   useEffect(() => {
-    if (tab !== "logs") {
-      if (logsSocketRef.current) {
-        logsSocketRef.current.disconnect()
-        logsSocketRef.current = null
-        setLogsLive(false)
-      }
-      return
-    }
-
     const base = client.defaults.baseURL || window.location.origin
     const socket = io(`${base}/monitoring`, {
       transports: ["websocket", "polling"],
@@ -953,18 +924,200 @@ export default function Dashboard() {
     logsSocketRef.current = socket
 
     socket.on("connect", () => socket.emit("subscribe_logs"))
-    socket.on("logs_subscribed", () => setLogsLive(true))
-    socket.on("disconnect", () => setLogsLive(false))
     socket.on("log_event", (incoming: LogEntry) => {
+      // The logs WebSocket is global - it streams every audit entry in
+      // the system. The audit-log view is scoped to the selected exam
+      // (initial load filters by exam_id), so the live stream has to
+      // match. Empty exam_id is a system-wide event (no exam context)
+      // and we still surface it for the selected exam too.
+      const current = examIdRef.current
+      if (!current) return
+      const incomingExam = incoming.exam_id || ""
+      if (incomingExam && incomingExam !== current) return
       setLogs((prev) => [{ ...incoming, received_at: incoming.timestamp } as LogEntry, ...prev].slice(0, 500))
     })
 
     return () => {
       socket.disconnect()
       logsSocketRef.current = null
-      setLogsLive(false)
     }
-  }, [tab])
+  }, [])
+
+  // Always-on exam-room subscription. Stays connected for the lifetime of
+  // any loaded exam regardless of which tab is active, so the live events
+  // feed, audit log, and Students Joined table all accumulate continuously.
+  // Previously this was tab-scoped - events that fired while the teacher
+  // was on a different tab were lost until a manual refresh.
+  useEffect(() => {
+    if (!examId) {
+      if (examRoomSocketRef.current) {
+        examRoomSocketRef.current.disconnect()
+        examRoomSocketRef.current = null
+      }
+      return
+    }
+
+    const base = client.defaults.baseURL || window.location.origin
+    const socket = io(`${base}/monitoring`, {
+      transports: ["websocket", "polling"],
+      reconnection: true,
+    })
+    examRoomSocketRef.current = socket
+
+    socket.on("connect", () => socket.emit("subscribe", { exam_id: examId }))
+
+    socket.on("students_changed", () => {
+      void loadExamStudents(examId, { silent: true })
+    })
+
+    const onMonitoring = (kind: string) => (data: {
+      user_id?: string; username?: string; timestamp?: string;
+      event_type?: string; is_idle?: boolean; is_fast_answer?: boolean;
+    }) => {
+      // Only surface signals that are actually suspicious - a quiet feed is
+      // a healthy feed. Every save_answer fires `behavioral_event`, every
+      // 15s heartbeat fires `activity_event` - without filtering you get a
+      // wall of noise and miss the real signals.
+      if (kind === "behavioral_event" && !data.is_fast_answer) return
+      if (kind === "activity_event" && !data.is_idle) return
+      if (kind === "tab_event" && data.event_type !== "blur" && data.event_type !== "hidden") return
+      // clipboard_event always lands - paste / copy / cut all matter
+
+      setLiveEvents((prev) => [
+        { kind, user_id: data.user_id, username: data.username, timestamp: data.timestamp || new Date().toISOString() },
+        ...prev,
+      ].slice(0, 50))
+    }
+    socket.on("tab_event", onMonitoring("tab_event"))
+    socket.on("clipboard_event", onMonitoring("clipboard_event"))
+    socket.on("activity_event", onMonitoring("activity_event"))
+    socket.on("behavioral_event", onMonitoring("behavioral_event"))
+
+    socket.on("risk_computed", () => {
+      // State has just moved through SUBMITTED -> ANALYZING -> COMPLETED on
+      // the server. Pull the new state silently so the Current Stage card
+      // and the risk dashboard both stay in sync without nuking any error
+      // banner the teacher might be reading.
+      void loadRiskDashboard(examId, { silent: true })
+      client
+        .get<ExamStateResponse>(`/api/auth/exam/state/${examId}`)
+        .then((res) => {
+          const next = res.data.data.state
+          setExamState(next)
+          setExams((current) => current.map((exam) => (exam.exam_id === examId ? { ...exam, state: next } : exam)))
+        })
+        .catch(() => {})
+    })
+
+    return () => {
+      socket.disconnect()
+      examRoomSocketRef.current = null
+    }
+  }, [examId])
+
+  const handleExportResultsCsv = async () => {
+    if (!examId) return
+    try {
+      const response = await client.get<ApiResponse<{
+        exam_title: string
+        total_marks: number
+        negative_marking_factor: number
+        risk_max_penalty_fraction: number
+        students: Array<{
+          username: string
+          mcq_correct: number
+          mcq_wrong: number
+          mcq_unanswered: number
+          mcq_score: number
+          mcq_total: number
+          text_pending_review: number
+          text_total: number
+          negative_penalty: number
+          risk_score: number
+          risk_penalty: number
+          final_score: number
+          exam_total: number
+        }>
+      }>>(`/api/questions/exams/${examId}/results`)
+      const { exam_title, students, negative_marking_factor, risk_max_penalty_fraction } = response.data.data
+      const headers = [
+        "username",
+        "mcq_correct",
+        "mcq_wrong",
+        "mcq_unanswered",
+        "mcq_score",
+        "mcq_total",
+        "text_pending_review",
+        "text_total",
+        "negative_penalty",
+        "risk_score",
+        "risk_penalty",
+        "final_score",
+        "exam_total",
+      ]
+      const escape = (v: unknown) => {
+        const s = v === null || v === undefined ? "" : String(v)
+        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+      }
+      const rows = students.map((r) => headers.map((h) => escape((r as unknown as Record<string, unknown>)[h])).join(","))
+      const meta = [
+        `# Exam: ${exam_title}`,
+        `# Negative marking: -${(negative_marking_factor * 100).toFixed(0)}% of each wrong MCQ's marks`,
+        `# Risk penalty: up to -${(risk_max_penalty_fraction * 100).toFixed(0)}% of marks earned at 10/10 risk (scaled linearly)`,
+        `# final_score = max(0, mcq_score - negative_penalty - risk_penalty)`,
+      ].join("\n")
+      const csv = [meta, headers.join(","), ...rows].join("\n")
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      const slug = (exam_title || "exam").replace(/[^\w-]+/g, "_")
+      a.href = url
+      a.download = `${slug}_results.csv`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (resultsError) {
+      setError(getErrorMessage(resultsError))
+    }
+  }
+
+  const handleExportRiskCsv = () => {
+    if (!riskData.length) return
+    const examTitle = (selectedExam?.title || "exam").replace(/[^\w-]+/g, "_")
+    const headers = [
+      "username", "score", "risk_level",
+      "tab_switches", "clipboard_pastes", "idle_seconds",
+      "fast_answers", "similarity_score", "computed_at",
+    ]
+    const escape = (v: unknown) => {
+      const s = v === null || v === undefined ? "" : String(v)
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    const rows = [...riskData]
+      .sort((a, b) => b.score - a.score)
+      .map((r) => [
+        r.username || "Deleted user",
+        r.score.toFixed(2),
+        r.risk_level,
+        r.metrics.tab_switch_count ?? r.metrics.tab_switches ?? 0,
+        r.metrics.clipboard_paste_count ?? 0,
+        r.metrics.idle_time_seconds ?? 0,
+        r.metrics.fast_answer_count ?? r.metrics.fast_answers ?? 0,
+        (r.metrics.similarity_score ?? 0).toFixed?.(4) ?? r.metrics.similarity_score ?? 0,
+        r.computed_at || "",
+      ].map(escape).join(","))
+    const csv = [headers.join(","), ...rows].join("\n")
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `${examTitle}_risk_scores.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
 
   const navItems: Array<{ key: Tab; label: string; icon: typeof BookOpen }> = [
     { key: "exams", label: "Exams", icon: BookOpen },
@@ -972,7 +1125,6 @@ export default function Dashboard() {
     { key: "questions", label: "Questions", icon: FileQuestion },
     { key: "logs", label: "Activity", icon: ScrollText },
     { key: "risk", label: "Risk", icon: ShieldAlert },
-    { key: "students", label: "Students", icon: Users },
   ]
 
   const pageMeta: Record<Tab, { title: string; sub: string }> = {
@@ -988,9 +1140,19 @@ export default function Dashboard() {
   return (
     <div className="exam-shell">
       <header className="topbar">
-        <div className="topbar-brand">
-          <span className="topbar-brand-mark"><ShieldCheck size={12} /></span>
-          Secure Exam
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <button
+            type="button"
+            className="sidebar-toggle"
+            aria-label={sidebarOpen ? "Close menu" : "Open menu"}
+            onClick={() => setSidebarOpen((v) => !v)}
+          >
+            {sidebarOpen ? <X size={18} /> : <Menu size={18} />}
+          </button>
+          <div className="topbar-brand">
+            <span className="topbar-brand-mark"><ShieldCheck size={12} /></span>
+            Secure Exam
+          </div>
         </div>
 
         <div className="topbar-context">
@@ -999,7 +1161,7 @@ export default function Dashboard() {
               <span className="exam-title">{selectedExam.title}</span>
               {examState ? (
                 <span className={`badge ${getStateBadgeClass(examState)}`}>
-                  {examState.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())}
+                  {prettyExamState(examState)}
                 </span>
               ) : null}
             </>
@@ -1009,16 +1171,12 @@ export default function Dashboard() {
         </div>
 
         <div className="topbar-right">
-          <span className={`live-pill ${liveConnected ? "connected" : ""}`}>
-            <span className="live-dot" />
-            {liveConnected ? "Live" : "Offline"}
-          </span>
           <span className="topbar-user"><b>{user?.username || "—"}</b></span>
         </div>
       </header>
 
       <div className="app-shell">
-        <nav className="sidebar">
+        <nav className={`sidebar ${sidebarOpen ? "open" : ""}`}>
           <div className="sidebar-group">
             <div className="sidebar-group-title">Navigation</div>
             {navItems.map((item) => {
@@ -1028,7 +1186,7 @@ export default function Dashboard() {
                   key={item.key}
                   type="button"
                   className={`sidebar-link ${tab === item.key ? "active" : ""}`}
-                  onClick={() => setTab(item.key)}
+                  onClick={() => { setTab(item.key); setSidebarOpen(false) }}
                 >
                   <Icon /> {item.label}
                 </button>
@@ -1046,8 +1204,8 @@ export default function Dashboard() {
                   onChange={(event) => {
                     const id = event.target.value
                     if (!id) return
-                    setExamIdInput(id)
-                    setTimeout(() => void handleLoadExam(), 0)
+                    const exam = exams.find((e) => e.exam_id === id)
+                    if (exam) void handleSelectExam(exam)
                   }}
                   style={{ fontSize: "0.875rem" }}
                 >
@@ -1073,6 +1231,13 @@ export default function Dashboard() {
           </div>
 
         </nav>
+        {sidebarOpen ? (
+          <div
+            className="sidebar-backdrop open"
+            onClick={() => setSidebarOpen(false)}
+            aria-hidden="true"
+          />
+        ) : null}
 
         <main className="main">
           <div className="page-header">
@@ -1100,30 +1265,30 @@ export default function Dashboard() {
                 <input className="input" value={newExamDesc} onChange={(event) => setNewExamDesc(event.target.value)} />
               </div>
 
-              <div className="field">
-                <label className="label">Duration (minutes)</label>
-                <input className="input" type="number" value={newExamDuration} onChange={(event) => setNewExamDuration(Number.parseInt(event.target.value || "0", 10) || 0)} />
+              <div className="form-grid-2">
+                <div className="field">
+                  <label className="label">Max students</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={newExamMaxStudents}
+                    onChange={(event) => setNewExamMaxStudents(Number.parseInt(event.target.value || "0", 10) || 0)}
+                    placeholder="30"
+                  />
+                </div>
+                <div className="field">
+                  <label className="label">Exam date</label>
+                  <input className="input" type="date" value={newExamDate} onChange={(event) => setNewExamDate(event.target.value)} />
+                </div>
               </div>
 
-              <div className="field">
-                <label className="label">Max Students</label>
-                <input
-                  className="input"
-                  type="number"
-                  min={1}
-                  max={200}
-                  value={newExamMaxStudents}
-                  onChange={(event) => setNewExamMaxStudents(Number.parseInt(event.target.value || "0", 10) || 0)}
-                  placeholder="30"
-                />
-              </div>
-
-              <div className="field">
-                <label className="label">Exam date</label>
-                <input className="input" type="date" value={newExamDate} onChange={(event) => setNewExamDate(event.target.value)} />
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div className="form-grid-3">
+                <div className="field">
+                  <label className="label">Duration (min)</label>
+                  <input className="input" type="number" value={newExamDuration} onChange={(event) => setNewExamDuration(Number.parseInt(event.target.value || "0", 10) || 0)} />
+                </div>
                 <div className="field">
                   <label className="label">Starts at</label>
                   <input className="input" type="time" value={newExamStartTime} onChange={(event) => setNewExamStartTime(event.target.value)} />
@@ -1167,8 +1332,8 @@ export default function Dashboard() {
                         <td>{exam.duration_minutes} min</td>
                         <td>{formatLocalDateTime(exam.start_time)}</td>
                         <td>{formatLocalDateTime(exam.end_time)}</td>
-                        <td>{exam.students_count}/{exam.max_students}</td>
-                        <td><span className={`badge ${getStateBadgeClass(exam.state)}`}>{exam.state}</span></td>
+                        <td>{exam.approved_count ?? 0}/{exam.max_students}</td>
+                        <td><span className={`badge ${getStateBadgeClass(exam.state)}`}>{prettyExamState(exam.state)}</span></td>
                         <td>
                           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                             <button type="button" className="btn btn-ghost" onClick={() => void handleSelectExam(exam)}>
@@ -1213,7 +1378,7 @@ export default function Dashboard() {
                         <h2 style={{ marginBottom: 4 }}>{selectedExam.title}</h2>
                         <p className="muted">{selectedExam.description || "No description"}</p>
                       </div>
-                      <span className={`badge ${getStateBadgeClass(selectedExam.state)}`} style={{ flexShrink: 0 }}>{selectedExam.state}</span>
+                      <span className={`badge ${getStateBadgeClass(selectedExam.state)}`} style={{ flexShrink: 0 }}>{prettyExamState(selectedExam.state)}</span>
                     </div>
 
                     <div className="stats-grid" style={{ marginBottom: 0 }}>
@@ -1222,8 +1387,16 @@ export default function Dashboard() {
                         <div className="stat-value">{selectedExam.duration_minutes}<span className="stat-suffix">min</span></div>
                       </div>
                       <div className="stat-card">
-                        <div className="stat-eyebrow">Enrolled</div>
-                        <div className="stat-value">{selectedExam.students_count}<span className="stat-suffix">/{selectedExam.max_students}</span></div>
+                        <div className="stat-eyebrow">Approved</div>
+                        <div className="stat-value">
+                          {selectedExam.approved_count ?? 0}
+                          <span className="stat-suffix">/{selectedExam.max_students}</span>
+                        </div>
+                        {selectedExam.students_count > (selectedExam.approved_count ?? 0) ? (
+                          <div className="muted" style={{ fontSize: "0.75rem", marginTop: 4 }}>
+                            {selectedExam.students_count - (selectedExam.approved_count ?? 0)} pending approval
+                          </div>
+                        ) : null}
                       </div>
                       <div className="stat-card">
                         <div className="stat-eyebrow">Questions</div>
@@ -1238,6 +1411,31 @@ export default function Dashboard() {
                     <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: "0.8125rem", color: "var(--ink-3)" }}>
                       <span><b style={{ color: "var(--ink-2)" }}>Starts</b> · {formatLocalDateTime(selectedExam.start_time)}</span>
                       <span><b style={{ color: "var(--ink-2)" }}>Ends</b> · {formatLocalDateTime(selectedExam.end_time)}</span>
+                    </div>
+
+                    <div className="hairline" />
+
+                    <div style={{ display: "grid", gap: 12 }}>
+                      <div>
+                        <div className="eyebrow" style={{ marginBottom: 6 }}>Exam ID — share with students</div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          <code style={{ fontFamily: "var(--font-mono)", fontSize: "0.8125rem", padding: "8px 12px", background: "var(--surface-2)", border: "1px solid var(--rule)", borderRadius: "var(--radius-sm)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {examId}
+                          </code>
+                          <CopyButton value={examId} label="Copy exam ID" />
+                        </div>
+                      </div>
+                      {activationCode ? (
+                        <div>
+                          <div className="eyebrow" style={{ marginBottom: 6 }}>Join code — share with students</div>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <code style={{ fontFamily: "var(--font-mono)", fontSize: "1rem", fontWeight: 500, padding: "8px 12px", background: "var(--accent-tint)", border: "1px solid var(--accent)", color: "var(--accent)", borderRadius: "var(--radius-sm)", flex: 1, letterSpacing: "0.05em" }}>
+                              {activationCode}
+                            </code>
+                            <CopyButton value={activationCode} label="Copy join code" />
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ) : null}
@@ -1254,7 +1452,7 @@ export default function Dashboard() {
                   <div className="stat-card">
                     <div className="stat-eyebrow">Current stage</div>
                     <div className="stat-value" style={{ fontSize: "1rem", fontFamily: "var(--font-sans)", textTransform: "none", letterSpacing: 0 }}>
-                      {examState ? examState.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : "—"}
+                      {examState ? prettyExamState(examState) : "—"}
                     </div>
                   </div>
                 </div>
@@ -1275,23 +1473,36 @@ export default function Dashboard() {
                       </button>
                     </>
                   ) : null}
-                  <button type="button" className="btn btn-primary" onClick={() => void handleGenerateActivationCode()} disabled={loading}>
-                    {loading ? <span className="spinner" aria-label="Loading" /> : "View Activation Code"}
-                  </button>
-                  <button type="button" className="btn btn-ghost" onClick={() => void handleRunRiskScoring()} disabled={loading}>
-                    {loading ? <span className="spinner" aria-label="Loading" /> : "Run Risk Scoring"}
-                  </button>
+                  {canShowActivationCode ? (
+                    <button type="button" className="btn btn-primary" onClick={() => void handleGenerateActivationCode()} disabled={loading}>
+                      {loading ? <span className="spinner" aria-label="Loading" /> : "View Activation Code"}
+                    </button>
+                  ) : null}
+                  {examState === "SUBMITTED" || examState === "ANALYZING" ? (
+                    <span className="badge badge-zinc" style={{ alignSelf: "center" }}>
+                      <span className="spinner" style={{ width: 10, height: 10, marginRight: 6 }} /> Scoring…
+                    </span>
+                  ) : null}
+                  {examState === "COMPLETED" ? (
+                    <button type="button" className="btn btn-ghost" onClick={() => setTab("risk")} disabled={loading}>
+                      View Risk Scores
+                    </button>
+                  ) : null}
+                  {examOver ? (
+                    <button type="button" className="btn btn-primary" onClick={() => void handleExportResultsCsv()} disabled={loading}>
+                      <Download size={14} /> Export Results
+                    </button>
+                  ) : null}
                 </div>
 
-                {activationCode ? <div className="alert alert-success">Activation Code: {activationCode}</div> : null}
 
                 <hr style={{ margin: "24px 0", border: "none", borderTop: "1px solid #e5e7eb" }} />
 
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                   <h3 style={{ marginBottom: 0 }}>Students Joined</h3>
-                  <button type="button" className="btn btn-ghost" onClick={() => void handleLoadExamStudents()} disabled={loading}>
-                    {loading ? <span className="spinner" aria-label="Loading" /> : "Refresh Students"}
-                  </button>
+                  <span className="muted" style={{ fontSize: "0.8125rem" }}>
+                    {examStudents.length} {examStudents.length === 1 ? "student" : "students"} · live
+                  </span>
                 </div>
 
                 {examStudents.length === 0 ? (
@@ -1301,8 +1512,9 @@ export default function Dashboard() {
                     <table>
                       <thead>
                         <tr>
-                          <th>Student ID</th>
-                          <th>Joined At</th>
+                          <th>Student</th>
+                          <th>Joined</th>
+                          <th>Activated</th>
                           <th>Status</th>
                           <th>Action</th>
                         </tr>
@@ -1310,8 +1522,9 @@ export default function Dashboard() {
                       <tbody>
                         {examStudents.map((student) => (
                           <tr key={student.student_id}>
-                            <td>{student.student_id}</td>
+                            <td>{student.username || "—"}</td>
                             <td>{formatLocalDateTime(student.joined_at)}</td>
+                            <td>{student.activated_at ? formatLocalDateTime(student.activated_at) : <span className="muted">—</span>}</td>
                             <td>
                               <span className={`badge ${student.approved ? "badge-green" : "badge-zinc"}`}>
                                 {student.approved ? "Approved" : "Pending"}
@@ -1349,6 +1562,12 @@ export default function Dashboard() {
             </section>
           ) : (
             <section style={{ display: "grid", gap: 18 }}>
+              {!canEditQuestions ? (
+                <div className="alert alert-warning">
+                  This exam is locked — questions can't be added, edited, or removed once it has been approved.
+                </div>
+              ) : null}
+              {canEditQuestions ? (
               <div className="card" style={{ display: "grid", gap: 16 }}>
                 <h2>Add Question</h2>
 
@@ -1412,6 +1631,7 @@ export default function Dashboard() {
                   {loading ? <span className="spinner" aria-label="Loading" /> : "Add Question"}
                 </button>
               </div>
+              ) : null}
 
               <div className="card" style={{ display: "grid", gap: 16 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
@@ -1444,14 +1664,18 @@ export default function Dashboard() {
                           <td>{question.word_limit}</td>
                           <td>{question.options.length}</td>
                           <td>
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                              <button type="button" className="btn btn-ghost" onClick={() => handleOpenEditQuestion(question)} disabled={loading}>
-                                Edit
-                              </button>
-                              <button type="button" className="btn btn-ghost" onClick={() => setDeleteQuestionId(question.question_id)} disabled={loading} style={{ color: "#dc2626" }}>
-                                Delete
-                              </button>
-                            </div>
+                            {canEditQuestions ? (
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <button type="button" className="btn btn-ghost" onClick={() => handleOpenEditQuestion(question)} disabled={loading}>
+                                  Edit
+                                </button>
+                                <button type="button" className="btn btn-ghost" onClick={() => setDeleteQuestionId(question.question_id)} disabled={loading} style={{ color: "#dc2626" }}>
+                                  Delete
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="muted" style={{ fontSize: "0.8125rem" }}>locked</span>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -1466,16 +1690,8 @@ export default function Dashboard() {
         {tab === "logs" ? (
           <section className="card" style={{ display: "grid", gap: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <span className={`live-pill ${logsLive ? "connected" : ""}`}>
-                  <span className="live-dot" />
-                  {logsLive ? "Live · streaming" : "Connecting…"}
-                </span>
-                <span className="muted">{logs.length} entries</span>
-              </div>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => void handleRefreshLogs()} disabled={loading || !examId}>
-                {loading ? <span className="spinner" aria-label="Loading" /> : "Refresh"}
-              </button>
+              <h3 style={{ marginBottom: 0 }}>Audit log</h3>
+              <span className="muted" style={{ fontSize: "0.8125rem" }}>{logs.length} entries · live</span>
             </div>
 
             {logs.length === 0 ? (
@@ -1503,7 +1719,7 @@ export default function Dashboard() {
                         <td className="mono" style={{ color: "var(--ink-3)", whiteSpace: "nowrap" }}>
                           {entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : "—"}
                         </td>
-                        <td>{entry.user_id || "system"}</td>
+                        <td>{entry.username || (entry.user_id ? "—" : "system")}</td>
                         <td>{humanizeAction(entry.action)}</td>
                         <td><span className={`badge ${getStateBadgeClass(entry.level)}`}>{entry.level}</span></td>
                       </tr>
@@ -1519,27 +1735,30 @@ export default function Dashboard() {
           <section className="card" style={{ display: "grid", gap: 20 }}>
             <div style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <button type="button" className="btn btn-primary" onClick={() => void handleLoadRiskScores()} disabled={loading || !examId}>
-                  {loading ? <span className="spinner" aria-label="Loading" /> : <><Gauge size={14} /> Load risk scores</>}
-                </button>
+                <h3 style={{ margin: 0 }}>Risk scores</h3>
                 {liveEvents.length > 0 ? (
-                  <span className="badge badge-accent"><Radio size={12} /> {liveEvents.length} live events</span>
+                  <span className="muted" style={{ fontSize: "0.8125rem" }}>{liveEvents.length} live events</span>
                 ) : null}
               </div>
-              <span className={`live-pill ${liveConnected ? "connected" : ""}`}>
-                <span className="live-dot" />
-                {liveConnected ? "Live · streaming" : "Connecting…"}
-              </span>
+              {examState === "COMPLETED" && riskData.length > 0 ? (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={handleExportRiskCsv}>
+                  <Download size={14} /> Export CSV
+                </button>
+              ) : null}
             </div>
 
             {riskData.length === 0 ? (
               <div className="empty">
                 <Gauge />
-                <div className="empty-title">No scores computed yet</div>
+                <div className="empty-title">No scores yet</div>
                 <div className="empty-body">
-                  {examId
-                    ? "Hit Load risk scores once the exam reaches SUBMITTED — Module 17 will aggregate the telemetry from every monitoring module."
-                    : "Pick an exam first, then we can score it."}
+                  {!examId
+                    ? "Pick an exam from the sidebar to see its risk breakdown."
+                    : examState === "COMPLETED"
+                    ? "Scores will appear here once they finish publishing."
+                    : examState === "SUBMITTED" || examState === "ANALYZING"
+                    ? "Scoring is running in the background. Results will show up here as soon as they're ready."
+                    : "Scores appear automatically once the exam ends."}
                 </div>
               </div>
             ) : (
@@ -1577,8 +1796,7 @@ export default function Dashboard() {
                     .map((row) => (
                       <div key={`${row.student_id}-${row.computed_at}`} className={`risk-row ${row.risk_level.toLowerCase()}`}>
                         <div className="risk-row-head">
-                          <span className="risk-row-name">{row.username || "Unknown"}</span>
-                          <span className="risk-row-id">{row.student_id.slice(-8)}</span>
+                          <span className="risk-row-name">{row.username || "Deleted user"}</span>
                           <span className={`badge ${getStateBadgeClass(row.risk_level)}`}>{row.risk_level}</span>
                         </div>
                         <div className="risk-row-score">
@@ -1621,10 +1839,6 @@ export default function Dashboard() {
               </div>
             )}
 
-            {liveConnected && liveEvents.length === 0 ? (
-              <p className="muted">Live stream open — waiting for events from any enrolled student.</p>
-            ) : null}
-
             {liveEvents.length > 0 ? (
               <div>
                 <div className="live-feed-head">
@@ -1646,14 +1860,22 @@ export default function Dashboard() {
                       behavioral_event: "Behavioral signal",
                     }
                     const Icon = iconMap[ev.kind] || Activity
+                    const who = ev.username || (ev.user_id ? "anonymous" : "")
+                    let timeText = ""
+                    if (ev.timestamp) {
+                      const d = new Date(ev.timestamp)
+                      timeText = Number.isNaN(d.getTime())
+                        ? ""
+                        : d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+                    }
                     return (
                       <div key={`${ev.kind}-${idx}`} className={`live-event kind-${ev.kind}`}>
                         <span className="live-event-icon"><Icon /></span>
                         <div>
                           <div className="live-event-title">{labelMap[ev.kind] || ev.kind}</div>
-                          <div className="live-event-meta">{ev.user_id ? `student ${ev.user_id.slice(-8)}` : "—"}</div>
+                          {who ? <div className="live-event-meta">{who}</div> : null}
                         </div>
-                        <span className="live-event-time">{ev.timestamp ? formatLocalDateTime(ev.timestamp).split(" ").pop() : "—"}</span>
+                        {timeText ? <span className="live-event-time">{timeText}</span> : null}
                       </div>
                     )
                   })}
@@ -1721,22 +1943,22 @@ export default function Dashboard() {
               <input className="input" value={editExamDesc} onChange={(event) => setEditExamDesc(event.target.value)} />
             </div>
 
-            <div className="field" style={{ marginBottom: 16 }}>
-              <label className="label">Duration (minutes)</label>
-              <input className="input" type="number" value={editExamDuration} onChange={(event) => setEditExamDuration(Number.parseInt(event.target.value || "0", 10) || 0)} />
+            <div className="form-grid-2" style={{ marginBottom: 16 }}>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label className="label">Max students</label>
+                <input className="input" type="number" min={1} max={200} value={editExamMaxStudents} onChange={(event) => setEditExamMaxStudents(Number.parseInt(event.target.value || "0", 10) || 0)} />
+              </div>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label className="label">Exam date</label>
+                <input className="input" type="date" value={editExamDate} onChange={(event) => setEditExamDate(event.target.value)} />
+              </div>
             </div>
 
-            <div className="field" style={{ marginBottom: 16 }}>
-              <label className="label">Max Students</label>
-              <input className="input" type="number" min={1} max={200} value={editExamMaxStudents} onChange={(event) => setEditExamMaxStudents(Number.parseInt(event.target.value || "0", 10) || 0)} />
-            </div>
-
-            <div className="field" style={{ marginBottom: 16 }}>
-              <label className="label">Exam date</label>
-              <input className="input" type="date" value={editExamDate} onChange={(event) => setEditExamDate(event.target.value)} />
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+            <div className="form-grid-3" style={{ marginBottom: 16 }}>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label className="label">Duration (min)</label>
+                <input className="input" type="number" value={editExamDuration} onChange={(event) => setEditExamDuration(Number.parseInt(event.target.value || "0", 10) || 0)} />
+              </div>
               <div className="field" style={{ marginBottom: 0 }}>
                 <label className="label">Starts at</label>
                 <input className="input" type="time" value={editExamStartTime} onChange={(event) => setEditExamStartTime(event.target.value)} />

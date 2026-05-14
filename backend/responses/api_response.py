@@ -47,7 +47,7 @@ def error_response(message, error_code, status_code=None):
 
 def accepted_response(message="Request accepted"):
     """
-    HTTP 202 Accepted — used by logging gateway (async).
+    HTTP 202 Accepted - used by logging gateway (async).
     """
     response = {
         "status": "accepted",

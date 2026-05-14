@@ -1,4 +1,4 @@
-from config.config import now
+from config.config import now, iso_utc_z
 import hashlib
 import json
 
@@ -15,7 +15,7 @@ from exceptions import BadRequestException, DatabaseException, NotFoundException
 def _serialize_dt(dt):
     if dt is None:
         return None
-    return dt.replace(microsecond=0).isoformat() + "Z"
+    return iso_utc_z(dt)
 
 
 def _compute_integrity(content_dict):
@@ -66,15 +66,39 @@ def write_log(payload):
 
     integrity_hash = _compute_integrity(content)
 
+    # Resolve username NOW and persist on the log doc. Stored outside the
+    # integrity-hashed content so the chain isn't affected. This makes the
+    # audit log self-contained - historical entries still read correctly
+    # after the user is wiped.
+    from config.config import users_col
+    resolved_username = ""
+    if user_id:
+        try:
+            udoc = users_col.find_one({"_id": ObjectId(user_id)}, {"username": 1})
+            if udoc:
+                resolved_username = udoc.get("username", "")
+        except Exception:
+            pass
+    if not user_id:
+        display_name = "System"
+    elif isinstance(user_id, str) and user_id.startswith("system_"):
+        display_name = "System"
+    else:
+        display_name = resolved_username or "Deleted user"
+
     doc = dict(content)
-    doc.update({"integrity_hash": integrity_hash, "received_at": now()})
+    doc.update({
+        "integrity_hash": integrity_hash,
+        "received_at": now(),
+        "username": display_name,
+    })
 
     try:
         result = logs_col.insert_one(doc)
     except PyMongoError as exc:
         raise DatabaseException(str(exc))
 
-    # §24 bonus: broadcast every new log to the WebSocket logs room so the
+    # section 24 bonus: broadcast every new log to the WebSocket logs room so the
     # teacher audit-log UI updates in real time without polling.
     try:
         from middleware.socketio_app import emit_log_event
@@ -83,6 +107,7 @@ def write_log(payload):
             "module": module,
             "level": level,
             "user_id": user_id,
+            "username": display_name,
             "exam_id": exam_id or "",
             "action": action,
             "details": details,
@@ -131,7 +156,7 @@ def verify_log(log_id):
 def verify_window(filters):
     """
     Recompute SHA-256 integrity hashes over a window of logs and flag
-    any tampered entries. Use it to demonstrate the §27.3 integrity claim:
+    any tampered entries. Use it to demonstrate the section 27.3 integrity claim:
     tamper with a log document in Mongo, then call this endpoint and
     see the entry surface as not-intact.
 
@@ -210,25 +235,67 @@ def list_logs(filters):
         query["module"] = filters.get("module")
 
     try:
-        cursor = logs_col.find(query).sort("received_at", -1)
-        items = []
-        for log in cursor:
-            items.append({
-                "log_id": str(log.get("_id")),
-                "module": log.get("module"),
-                "level": log.get("level"),
-                "user_id": log.get("user_id"),
-                "exam_id": log.get("exam_id") or "",
-                "action": log.get("action"),
-                "details": log.get("details") or {},
-                "timestamp": log.get("timestamp"),
-                "integrity_hash": log.get("integrity_hash"),
-                "received_at": _serialize_dt(log.get("received_at")),
-            })
-
-        return {"logs": items, "count": len(items)}
+        cursor = list(logs_col.find(query).sort("received_at", -1))
     except PyMongoError as exc:
         raise DatabaseException(str(exc))
+
+    # Batched username resolution so the UI never has to display raw IDs.
+    from config.config import users_col
+    unique_ids = {log.get("user_id") for log in cursor if log.get("user_id")}
+    object_ids = []
+    for uid in unique_ids:
+        try:
+            object_ids.append(ObjectId(uid))
+        except Exception:
+            pass
+    username_map = {}
+    if object_ids:
+        for udoc in users_col.find({"_id": {"$in": object_ids}}, {"username": 1}):
+            username_map[str(udoc["_id"])] = udoc.get("username", "")
+
+    items = []
+    for log in cursor:
+        uid = log.get("user_id") or ""
+        # Prefer the username stored on the log at write time - it survives
+        # user deletion. Fall back to live lookup for legacy entries
+        # written before this field existed.
+        stored_name = log.get("username")
+        if stored_name:
+            display_name = stored_name
+        else:
+            display_name = _resolve_username_for_log(uid, username_map)
+        items.append({
+            "log_id": str(log.get("_id")),
+            "module": log.get("module"),
+            "level": log.get("level"),
+            "user_id": uid,
+            "username": display_name,
+            "exam_id": log.get("exam_id") or "",
+            "action": log.get("action"),
+            "details": log.get("details") or {},
+            "timestamp": log.get("timestamp"),
+            "integrity_hash": log.get("integrity_hash"),
+            "received_at": _serialize_dt(log.get("received_at")),
+        })
+
+    return {"logs": items, "count": len(items)}
+
+
+def _resolve_username_for_log(uid, username_map):
+    """
+    Username display rule for log rows:
+      empty/None     -> "System"   (action by the backend, no actor)
+      starts "system_" -> "System" (synthetic actor like system_timer)
+      in users       -> username
+      not in users   -> "Deleted user"  (account was wiped after log was written)
+    """
+    if not uid:
+        return "System"
+    if isinstance(uid, str) and uid.startswith("system_"):
+        return "System"
+    if uid in username_map and username_map[uid]:
+        return username_map[uid]
+    return "Deleted user"
 
 
 def get_health():

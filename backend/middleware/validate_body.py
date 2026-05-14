@@ -3,12 +3,12 @@
 
 Routes wrapped with this decorator call validation/service.validate_input on
 the request body before the handler runs. Failed validation raises 400 and
-emits a SECURITY log through the §27.3 logging gateway.
+emits a SECURITY log through the section 27.3 logging gateway.
 
 Applied conservatively to auth endpoints (small structured bodies, low
 risk of false positives). Answer-save and other long-form text endpoints
 are intentionally NOT wrapped to avoid blocking legitimate user content
-that contains keywords like `<img` or `src=` — Module 9 errs on the side
+that contains keywords like `<img` or `src=` - Module 9 errs on the side
 of paranoid pattern matching, which is appropriate for credentials and
 identity fields but not for free-form text.
 """
@@ -18,7 +18,7 @@ from functools import wraps
 import requests
 from flask import request
 
-from config.config import BASE_URL, now
+from config.config import BASE_URL, now, iso_utc_z
 from enums.log_level import LogLevel
 from enums.module_name import ModuleName
 from exceptions import BadRequestException
@@ -33,7 +33,7 @@ def _send_validation_log(reason, path):
         "exam_id": "",
         "action": "input_validation_failed",
         "details": {"reason": reason, "path": path},
-        "timestamp": now().replace(microsecond=0).isoformat() + "Z",
+        "timestamp": iso_utc_z(),
     }
     try:
         requests.post(f"{BASE_URL}/api/logs/write", json=payload, timeout=2)

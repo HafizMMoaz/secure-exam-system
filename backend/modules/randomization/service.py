@@ -4,7 +4,7 @@ import requests
 from bson import ObjectId
 from pymongo.errors import PyMongoError
 
-from config.config import exams_col, questions_col, randomized_orders_col, BASE_URL, now
+from config.config import exams_col, questions_col, randomized_orders_col, BASE_URL, now, iso_utc_z
 from enums.module_name import ModuleName
 from enums.log_level import LogLevel
 from enums.exam_state import ExamState
@@ -25,7 +25,7 @@ def _send_log(level, user_id, action, details):
         "exam_id": details.get("exam_id") if details else "",
         "action": action,
         "details": details or {},
-        "timestamp": now().replace(microsecond=0).isoformat() + "Z",
+        "timestamp": iso_utc_z(),
     }
     try:
         requests.post(f"{BASE_URL}/api/logs/write", json=payload, timeout=2)

@@ -12,6 +12,7 @@ from modules.questions.controller import (
   get_exam_route,
   get_exam_public_route,
   get_exam_students_route,
+  get_exam_results_route,
   list_all_for_student_route,
   list_answers_route,
   list_all,
@@ -590,6 +591,36 @@ def get_exam_students_bp_route(exam_id):
         description: Exam not found
     """
     return get_exam_students_route(exam_id)
+
+
+@questions_bp.route("/exams/<exam_id>/results", methods=["GET"])
+@jwt_required
+@role_required("teacher")
+def get_exam_results_bp_route(exam_id):
+    """
+    Auto-marked per-student exam results (teacher only).
+    Available once the exam has ended.
+    ---
+    tags:
+      - Questions
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: exam_id
+        type: string
+        required: true
+    responses:
+      200:
+        description: Results returned
+      401:
+        description: Invalid or missing JWT
+      403:
+        description: Forbidden
+      404:
+        description: Exam not found
+    """
+    return get_exam_results_route(exam_id)
 
 
 @questions_bp.route("/exams/students/approve", methods=["POST"])

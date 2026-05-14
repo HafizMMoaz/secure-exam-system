@@ -2,7 +2,7 @@ from datetime import timedelta
 import requests
 from pytz import utc
 
-from config.config import sessions_col, JWT_EXPIRY_MINUTES, BASE_URL, now
+from config.config import sessions_col, JWT_EXPIRY_MINUTES, BASE_URL, now, iso_utc_z
 from enums.module_name import ModuleName
 from enums.log_level import LogLevel
 from exceptions import (
@@ -14,7 +14,7 @@ from exceptions import (
 
 
 def _iso_now():
-    return now().replace(microsecond=0).isoformat() + "Z"
+    return iso_utc_z()
 
 
 def _normalize_dt(value):
@@ -74,6 +74,17 @@ def create_session(user_context):
     except Exception:
         pass
 
+    # PRD section 15 / Module 14 - auto-detect & invalidate any prior active
+    # sessions for this user. Running here (post-insert) means the new
+    # session_id is present so detect_multi_session correctly excludes it
+    # from the conflict set.
+    try:
+        from modules.multisession.service import detect_multi_session
+        detect_multi_session(user_context)
+    except Exception:
+        # Best-effort - never block a fresh login because of an MS check.
+        pass
+
     return {"session_id": session_id}
 
 
@@ -128,7 +139,7 @@ def validate_session(session_id):
         "session_id": session.get("session_id"),
         "user_id": session.get("user_id"),
         "is_active": session.get("is_active"),
-        "expires_at": session.get("expires_at").replace(microsecond=0).isoformat() + "Z",
+        "expires_at": iso_utc_z(session.get("expires_at")),
     }
 
 
@@ -146,10 +157,10 @@ def list_sessions(user_id=None):
                 "user_id": s.get("user_id"),
                 "username": s.get("username"),
                 "role": s.get("role"),
-                "created_at": s.get("created_at").replace(microsecond=0).isoformat() + "Z" if s.get("created_at") else None,
-                "expires_at": s.get("expires_at").replace(microsecond=0).isoformat() + "Z" if s.get("expires_at") else None,
+                "created_at": iso_utc_z(s.get("created_at")) if s.get("created_at") else None,
+                "expires_at": iso_utc_z(s.get("expires_at")) if s.get("expires_at") else None,
                 "is_active": s.get("is_active", False),
-                "invalidated_at": s.get("invalidated_at").replace(microsecond=0).isoformat() + "Z" if s.get("invalidated_at") else None,
+                "invalidated_at": iso_utc_z(s.get("invalidated_at")) if s.get("invalidated_at") else None,
             })
         return {"sessions": items, "count": len(items)}
     except Exception as exc:

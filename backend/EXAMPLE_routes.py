@@ -1,5 +1,5 @@
 """
-EXAMPLE — How to use responses and exceptions in any module route.
+EXAMPLE - How to use responses and exceptions in any module route.
 This file is NOT part of the actual system. Delete when done reading.
 """
 
@@ -22,7 +22,7 @@ example_bp = Blueprint("example", __name__)
 def get_data():
     data = {"items": [1, 2, 3]}
     return success_response(data=data, message="Data fetched successfully")
-    # → { "status": "success", "data": {"items": [1,2,3]}, "message": "..." }
+    # -> { "status": "success", "data": {"items": [1,2,3]}, "message": "..." }
 
 
 # ── Raising a custom exception ─────────────────────────────────────────────────
@@ -32,7 +32,7 @@ def get_item(item_id):
     item = None  # pretend DB lookup failed
     if not item:
         raise NotFoundException(f"Item '{item_id}' not found")
-        # → { "status": "error", "error_code": 404, "message": "...", "timestamp": "..." }
+        # -> { "status": "error", "error_code": 404, "message": "...", "timestamp": "..." }
 
     return success_response(data=item)
 
@@ -60,7 +60,7 @@ def exam_action():
             current_state=current_state,
             required_state=required_state
         )
-        # → HTTP 409 { "status": "error", "error_code": 409, "message": "Exam is in state 'SUBMITTED', expected 'IN_PROGRESS'" }
+        # -> HTTP 409 { "status": "error", "error_code": 409, "message": "Exam is in state 'SUBMITTED', expected 'IN_PROGRESS'" }
 
     return success_response(message="Action performed")
 
@@ -82,4 +82,4 @@ def health():
         version="1.0.0",
         healthy=True
     )
-    # → { "module": "Module_X_Example", "status": "healthy", "dependencies": [...], "version": "1.0.0" }
+    # -> { "module": "Module_X_Example", "status": "healthy", "dependencies": [...], "version": "1.0.0" }

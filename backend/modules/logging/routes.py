@@ -92,8 +92,8 @@ def verify_route(log_id):
 @role_required("teacher")
 def verify_window_bp_route():
     """
-    Verify integrity of a window of log entries — recomputes SHA-256 over each
-    log document and reports any that fail. Demonstrates the §27.3 integrity
+    Verify integrity of a window of log entries - recomputes SHA-256 over each
+    log document and reports any that fail. Demonstrates the section 27.3 integrity
     guarantee against direct DB tampering.
     ---
     tags:

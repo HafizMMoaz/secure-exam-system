@@ -2,9 +2,9 @@
 Shared client for the central exam-state-transition endpoint
 (PUT /api/auth/exam/state/<exam_id>).
 
-Per PRD §27.6 (strict), Module 1 is the sole writer of exams_col.state.
+Per PRD section 27.6 (strict), Module 1 is the sole writer of exams_col.state.
 Other modules call this helper instead of writing the collection
-directly. The helper forwards the caller's JWT so the §27.4 transition
+directly. The helper forwards the caller's JWT so the section 27.4 transition
 validation runs against the same authenticated request.
 """
 
@@ -21,7 +21,7 @@ def transition_exam_state(exam_id, target_state, auth_header, actor_module):
 
     Raises ExamStateException if Module 1 returns 409 (transition not
     allowed from current state) so the caller can propagate the same
-    §27.2 error response shape it would have raised locally.
+    section 27.2 error response shape it would have raised locally.
     """
     if not exam_id:
         raise DatabaseException("exam_id required for state transition")

@@ -42,9 +42,9 @@ def is_clipboard_burst(
     threshold: int = 3,
 ) -> bool:
     """
-    §24 bonus second advanced rule.
+    section 24 bonus second advanced rule.
 
-    Detects a burst of paste events inside a short window — the classic
+    Detects a burst of paste events inside a short window - the classic
     signature of dumping pre-prepared answers from another window. A
     pure count is not enough (legitimate students paste citations once
     or twice); the burst rule fires only when >threshold pastes happen
@@ -70,9 +70,9 @@ def is_fast_answer_acceleration(
     threshold: int = 3,
 ) -> bool:
     """
-    §24 bonus "advanced detection".
+    section 24 bonus "advanced detection".
 
-    Detects bursts of fast answers — not just "they had some fast answers"
+    Detects bursts of fast answers - not just "they had some fast answers"
     but "they accelerated into a cluster of fast answers within a short
     window." This catches the canonical bot-driven dump where a student
     works normally for a while and then suddenly mass-submits answers

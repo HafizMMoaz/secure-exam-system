@@ -3,7 +3,7 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from pymongo.errors import PyMongoError
 
-from config.config import users_col, BASE_URL, now
+from config.config import users_col, BASE_URL, now, iso_utc_z
 from enums.log_level import LogLevel
 from enums.module_name import ModuleName
 from enums.user_role import UserRole
@@ -43,7 +43,7 @@ PERMISSIONS = {
 def _iso_dt(value):
     if value is None:
         return None
-    return value.replace(microsecond=0).isoformat() + "Z"
+    return iso_utc_z(value)
 
 
 def _send_log(level, user_id, action, details):
@@ -143,7 +143,7 @@ def toggle_user_status(user_id, actor_user_id=None, auth_header=""):
 
     new_value = not bool(user.get("is_active", False))
 
-    # §27.6 (strict): users_col is owned by Module 1. RBAC is the policy
+    # section 27.6 (strict): users_col is owned by Module 1. RBAC is the policy
     # authority (decides who toggles whom) but routes the write through
     # the central /api/auth/users/<id>/active endpoint so Module 1 stays
     # the sole writer.

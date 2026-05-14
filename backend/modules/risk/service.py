@@ -4,6 +4,7 @@ from pymongo.errors import PyMongoError
 
 from config.config import responses_col, behavioral_events_col, exams_col, users_col, risk_scores_col, BASE_URL, now
 from middleware.state_client import transition_exam_state
+from middleware.socketio_app import emit_monitoring_event
 from enums.module_name import ModuleName
 from enums.log_level import LogLevel
 from enums.risk_metric import RiskMetric
@@ -93,30 +94,82 @@ def _compute_score(metrics):
     return score, risk_level
 
 
-def compute_exam_risk(user_context, exam_id, auth_header):
+def compute_exam_risk(user_context, exam_id, auth_header, system_actor=False):
+    """
+    `system_actor=True` skips the teacher role check. Used for the post-submit
+    auto-compute path where the trigger is the timer module finishing a
+    submit, not an interactive teacher request.
+    """
     if not exam_id:
         raise BadRequestException("exam_id is required")
 
-    if (user_context or {}).get("role") != "teacher":
+    if not system_actor and (user_context or {}).get("role") != "teacher":
         raise ForbiddenException("Only teachers can compute risk scores")
 
     exam = _load_exam(exam_id)
     current_state = exam.get("state")
+
+    # Idempotent: once the exam is already COMPLETED the scores live in
+    # risk_scores_col - return them without re-running the pipeline or
+    # touching the state machine. Saves teachers from a confusing 400 when
+    # they click "Compute" twice.
+    if current_state == ExamState.COMPLETED.value:
+        try:
+            cursor = list(risk_scores_col.find({"exam_id": exam_id}).sort("score", -1))
+        except PyMongoError as exc:
+            raise DatabaseException(str(exc))
+        results = [
+            {
+                "student_id": r.get("student_id"),
+                "score": float(r.get("score", 0)),
+                "risk_level": r.get("risk_level", "LOW"),
+                "metrics": r.get("metrics", {}),
+            }
+            for r in cursor
+        ]
+        return {
+            "exam_id": exam_id,
+            "students_scored": len(results),
+            "results": results,
+            "exam_state": ExamState.COMPLETED.value,
+            "already_computed": True,
+        }
+
     if current_state not in (ExamState.SUBMITTED.value, ExamState.ANALYZING.value):
         raise ExamStateException(
             current_state=current_state,
             required_state=f"{ExamState.SUBMITTED.value} or {ExamState.ANALYZING.value}",
         )
 
-    # §27.4 SUBMITTED → ANALYZING transition; idempotent if already ANALYZING.
-    # §27.6 (strict): routed through Module 1's central state endpoint.
+    # section 27.4 SUBMITTED -> ANALYZING transition; idempotent if already ANALYZING.
+    # section 27.6 (strict): routed through Module 1's central state endpoint -
+    # except when invoked as a system actor (no JWT available), in which
+    # case we apply the same section 27.6 documented exemption auto_submit uses.
+    def _set_state(target_state):
+        if system_actor:
+            exams_col.update_one(
+                {"_id": ObjectId(exam_id)},
+                {"$set": {"state": target_state}},
+            )
+        else:
+            transition_exam_state(exam_id, target_state, auth_header, ModuleName.RISK.value)
+
     if current_state == ExamState.SUBMITTED.value:
-        transition_exam_state(
-            exam_id,
-            ExamState.ANALYZING.value,
-            auth_header,
-            ModuleName.RISK.value,
+        _set_state(ExamState.ANALYZING.value)
+
+    # PRD section 14 step 9 - "Security analysis" runs before scoring. Trigger the
+    # similarity pipeline (Module 16) so the Risk formula's similarity
+    # weight reflects current answers, not stale results.
+    try:
+        from modules.similarity.service import analyze_exam_similarity
+        analyze_exam_similarity(
+            user_context={"role": "teacher", "user_id": (user_context or {}).get("user_id", "system_risk")},
+            exam_id=exam_id,
         )
+    except Exception as exc:
+        _send_log(LogLevel.WARNING.value, (user_context or {}).get("user_id"),
+                  "similarity_analyze_failed",
+                  {"exam_id": exam_id, "error": str(exc)})
 
     student_ids = _get_student_ids(exam_id)
     results = []
@@ -151,12 +204,15 @@ def compute_exam_risk(user_context, exam_id, auth_header):
 
         results.append({"student_id": student_id, "score": score, "risk_level": risk_level, "metrics": metrics})
 
-    # §27.6 (strict): routed through Module 1's central state endpoint.
-    transition_exam_state(
+    # section 27.6 (strict): routed through Module 1's central state endpoint.
+    _set_state(ExamState.COMPLETED.value)
+
+    # Realtime: tell the teacher dashboard the cohort scores are ready
+    # without forcing a manual reload.
+    emit_monitoring_event(
         exam_id,
-        ExamState.COMPLETED.value,
-        auth_header,
-        ModuleName.RISK.value,
+        "risk_computed",
+        {"exam_id": exam_id, "students_scored": len(results)},
     )
 
     return {
@@ -202,7 +258,7 @@ def get_dashboard(exam_id):
         students.append(
             {
                 "student_id": record.get("student_id"),
-                "username": user_doc.get("username", ""),
+                "username": user_doc.get("username") or "Deleted user",
                 "score": score,
                 "risk_level": risk_level,
                 "metrics": record.get("metrics", {}),

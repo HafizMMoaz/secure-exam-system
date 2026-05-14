@@ -7,7 +7,7 @@ from pymongo.errors import PyMongoError
 from config.config import devices_col, BASE_URL, now
 from enums.log_level import LogLevel
 from enums.module_name import ModuleName
-from exceptions import BadRequestException, DatabaseException
+from exceptions import BadRequestException, DatabaseException, ForbiddenException
 
 
 REQUIRED_SIGNALS = [
@@ -65,14 +65,33 @@ def _send_log(level, user_id, action, fingerprint):
 
 
 def register_device(user_context, payload):
+    """
+    PRD section 11 Module 3 - "Device binding, Prevent account sharing".
+    First registration for a user binds them to that fingerprint.
+    Subsequent registrations from a DIFFERENT fingerprint are rejected
+    as suspected account sharing. Matching fingerprint is idempotent.
+    """
     user_id = (user_context or {}).get("user_id")
     signals = _extract_signals(payload)
     fingerprint = _compute_fingerprint(signals)
 
     try:
-        existing = devices_col.find_one({"user_id": user_id, "fingerprint": fingerprint})
-        if existing:
+        existing_match = devices_col.find_one({"user_id": user_id, "fingerprint": fingerprint})
+        if existing_match:
+            devices_col.update_one(
+                {"_id": existing_match.get("_id")},
+                {"$set": {"last_seen": now()}},
+            )
             return {"fingerprint": fingerprint, "status": "already_registered"}
+
+        existing_any = devices_col.find_one({"user_id": user_id})
+        if existing_any:
+            # Different fingerprint from the one this user is bound to ->
+            # block and log. This is the prevent-account-sharing path.
+            _send_log(LogLevel.SECURITY.value, user_id, "device_binding_violation", fingerprint)
+            raise ForbiddenException(
+                "This account is bound to a different device. Sign in from your original device."
+            )
 
         current = now()
         devices_col.insert_one(

@@ -1,7 +1,7 @@
 """
-Flask-SocketIO singleton + monitoring namespace (PRD §24 bonus: WebSockets).
+Flask-SocketIO singleton + monitoring namespace (PRD section 24 bonus: WebSockets).
 
-Sits alongside the SSE stream — same data, different transport. The SSE
+Sits alongside the SSE stream - same data, different transport. The SSE
 endpoint stays in place for clients that block WebSocket upgrades (proxy
 quirks); the SocketIO namespace gives a real bidirectional WS channel
 for everyone else.
@@ -71,7 +71,7 @@ def emit_monitoring_event(exam_id, kind, payload):
     given exam's room. Called from Modules 10/11/12/15 after they record
     an event to their own collection.
 
-    Safe to call even when there are no subscribers — the emit is a
+    Safe to call even when there are no subscribers - the emit is a
     no-op in that case.
     """
     if not exam_id:
@@ -85,5 +85,5 @@ def emit_monitoring_event(exam_id, kind, payload):
         )
     except Exception:
         # Never let a transport hiccup break the calling event-recording
-        # path — monitoring events are best-effort relays.
+        # path - monitoring events are best-effort relays.
         pass

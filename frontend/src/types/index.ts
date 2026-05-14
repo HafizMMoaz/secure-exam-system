@@ -52,6 +52,7 @@ export interface Exam {
   created_at: string
   max_students: number
   students_count: number
+  approved_count: number
   start_time: string
   end_time: string
   total_questions: number
@@ -92,6 +93,7 @@ export interface LogEntry {
   module: string
   level: string
   user_id: string
+  username?: string
   exam_id: string
   action: string
   details: Record<string, unknown>

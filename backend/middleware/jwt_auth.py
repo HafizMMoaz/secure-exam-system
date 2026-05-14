@@ -2,8 +2,8 @@
 JWT Authentication Middleware.
 
 Decorators:
-    @jwt_required           — validates JWT, attaches payload to request.user
-    @role_required("teacher") — enforces RBAC on top of JWT validation
+    @jwt_required           - validates JWT, attaches payload to request.user
+    @role_required("teacher") - enforces RBAC on top of JWT validation
 
 Usage:
     from middleware.jwt_auth import jwt_required, role_required
@@ -47,7 +47,7 @@ def jwt_required(f):
         if auth_header.startswith("Bearer "):
             token = auth_header.split(" ")[1]
         elif request.args.get("token"):
-            # EventSource cannot set custom headers — accept JWT via ?token=
+            # EventSource cannot set custom headers - accept JWT via ?token=
             # query parameter for SSE endpoints. Only enabled because the
             # endpoints that use SSE are read-only and idempotent.
             token = request.args.get("token")
@@ -69,7 +69,7 @@ def jwt_required(f):
 def role_required(*roles):
     """
     Enforces role-based access control.
-    Must be used AFTER @jwt_required — relies on request.user being set.
+    Must be used AFTER @jwt_required - relies on request.user being set.
     Raises 403 if user's role is not in the allowed roles list.
 
     Example:

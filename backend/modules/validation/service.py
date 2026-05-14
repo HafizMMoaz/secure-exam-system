@@ -1,6 +1,6 @@
 import requests
 
-from config.config import BASE_URL, now
+from config.config import BASE_URL, now, iso_utc_z
 from enums.module_name import ModuleName
 from enums.log_level import LogLevel
 from exceptions import BadRequestException
@@ -48,7 +48,7 @@ def _get_depth(obj, current=0):
 def _iter_values(obj):
     if isinstance(obj, dict):
         for key, value in obj.items():
-            # Scan keys too — Mongo operator injection ({"$ne": null}) lives
+            # Scan keys too - Mongo operator injection ({"$ne": null}) lives
             # in the key, not the value, so a value-only scan misses it.
             yield key
             yield from _iter_values(value)
@@ -150,7 +150,7 @@ def _send_security_log(user_id, violations):
         "exam_id": "",
         "action": "input_validation_failed",
         "details": {"violations": violations},
-        "timestamp": now().replace(microsecond=0).isoformat() + "Z",
+        "timestamp": iso_utc_z(),
     }
     try:
         requests.post(f"{BASE_URL}/api/logs/write", json=payload, timeout=2)

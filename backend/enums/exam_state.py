@@ -3,12 +3,12 @@ from enum import Enum
 
 class ExamState(str, Enum):
     """
-    Exam state machine — section 27.4 of the spec.
+    Exam state machine - section 27.4 of the spec.
     Order matters: transitions must follow this sequence.
 
-    NOT_STARTED → DEVICE_VERIFIED → TEACHER_APPROVED
-    → ACTIVATION_VALID → IN_PROGRESS → SUBMITTED
-    → ANALYZING → COMPLETED
+    NOT_STARTED -> DEVICE_VERIFIED -> TEACHER_APPROVED
+    -> ACTIVATION_VALID -> IN_PROGRESS -> SUBMITTED
+    -> ANALYZING -> COMPLETED
     """
     NOT_STARTED      = "NOT_STARTED"
     DEVICE_VERIFIED  = "DEVICE_VERIFIED"
