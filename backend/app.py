@@ -13,23 +13,23 @@ from middleware.socketio_app import socketio
 app = Flask(__name__)
 CORS(app, origins=[FRONTEND_URL], supports_credentials=True)
 
-# ── Swagger docs at http://localhost:5500/api/docs ────────────────────────────
+# Swagger docs at http://localhost:5500/api/docs 
 init_swagger(app)
 
-# ── Register global error handlers ────────────────────────────────────────────
+# Register global error handlers
 register_error_handlers(app)
 
-# ── Rate limiting (Phase 5.4) ─────────────────────────────────────────────────
+# Rate limiting (Phase 5.4)─
 limiter.init_app(app)
 
-# ── WebSocket monitoring channel (PRD section 24 bonus) ──────────────────────────────
+# WebSocket monitoring channel (PRD section 24 bonus)
 socketio.init_app(app, cors_allowed_origins=[FRONTEND_URL, "*"])
 
 register_routes(app)
 start_auto_submit_job()
 
 
-# ── Global health check ───────────────────────────────────────────────────────
+# Global health check
 @app.route("/api/health", methods=["GET"])
 def global_health():
     """
