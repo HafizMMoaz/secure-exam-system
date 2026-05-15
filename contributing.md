@@ -1,6 +1,8 @@
 # Contributing
 
 Follow these steps to clone the repo, run the project locally, develop on a feature branch, test, and push:
+Read [Exanple Routes](./backend/EXAMPLE_routes.py)
+Read [SWAGGER TEMPLATES](./backend/SWAGGER_TEMPLATES.py)
 
 1) Clone the repository
 
