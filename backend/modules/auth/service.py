@@ -64,6 +64,22 @@ def register_user(payload):
     if role not in valid_roles:
         raise BadRequestException("role must be 'student' or 'teacher'")
 
+    # Password policy enforcement
+    pwd = _normalize_text(password)
+    errors = []
+    if len(pwd) < 8:
+        errors.append("password must be at least 8 characters")
+    if not any(c.isupper() for c in pwd):
+        errors.append("password must contain an uppercase letter")
+    if not any(c.islower() for c in pwd):
+        errors.append("password must contain a lowercase letter")
+    if not any(c.isdigit() for c in pwd):
+        errors.append("password must contain a digit")
+    if not any(not c.isalnum() for c in pwd):
+        errors.append("password must contain a special character")
+    if errors:
+        raise BadRequestException("Invalid password: " + "; ".join(errors))
+
     try:
         existing_user = users_col.find_one({"username": username})
         if existing_user:
