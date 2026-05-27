@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react"
+import { useState, type FormEvent, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
 import { ShieldCheck } from "lucide-react"
 import client from "../api/client"
@@ -32,6 +32,15 @@ export default function Register() {
       setLoading(false)
     }
   }
+
+  const pwdChecks = useMemo(() => {
+    const len = password.length >= 8
+    const upper = /[A-Z]/.test(password)
+    const lower = /[a-z]/.test(password)
+    const digit = /[0-9]/.test(password)
+    const special = /[^A-Za-z0-9]/.test(password)
+    return { len, upper, lower, digit, special, all: len && upper && lower && digit && special }
+  }, [password])
 
   return (
     <div className="auth-shell">
@@ -72,6 +81,24 @@ export default function Register() {
               required
               autoComplete="new-password"
             />
+
+            <ul style={{ marginTop: 8, marginBottom: 0, listStyle: "none" }}>
+              <li style={{ color: pwdChecks.len ? "#16a34a" : "#6b7280" }}>
+                {pwdChecks.len ? "✅" : "⚪"} At least 8 characters
+              </li>
+              <li style={{ color: pwdChecks.upper ? "#16a34a" : "#6b7280" }}>
+                {pwdChecks.upper ? "✅" : "⚪"} Contains an uppercase letter
+              </li>
+              <li style={{ color: pwdChecks.lower ? "#16a34a" : "#6b7280" }}>
+                {pwdChecks.lower ? "✅" : "⚪"} Contains a lowercase letter
+              </li>
+              <li style={{ color: pwdChecks.digit ? "#16a34a" : "#6b7280" }}>
+                {pwdChecks.digit ? "✅" : "⚪"} Contains a number
+              </li>
+              <li style={{ color: pwdChecks.special ? "#16a34a" : "#6b7280" }}>
+                {pwdChecks.special ? "✅" : "⚪"} Contains a special character
+              </li>
+            </ul>
           </label>
 
           <div className="field">
@@ -94,7 +121,7 @@ export default function Register() {
             </div>
           </div>
 
-          <button type="submit" className="btn btn-primary btn-full" disabled={loading}>
+          <button type="submit" className="btn btn-primary btn-full" disabled={loading || !pwdChecks.all}>
             {loading ? <span className="spinner" aria-label="Loading" /> : "Create account"}
           </button>
         </form>
