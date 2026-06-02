@@ -11,7 +11,9 @@ from middleware.rate_limit import limiter
 from middleware.socketio_app import socketio
 
 app = Flask(__name__)
-CORS(app, origins=[FRONTEND_URL], supports_credentials=True)
+allowed_origins = [origin.strip() for origin in FRONTEND_URL.split(",") if origin.strip()]
+
+CORS(app, origins=allowed_origins, supports_credentials=True)
 
 # Swagger docs at http://localhost:5500/api/docs 
 init_swagger(app)
@@ -23,7 +25,7 @@ register_error_handlers(app)
 limiter.init_app(app)
 
 # WebSocket monitoring channel (PRD section 24 bonus)
-socketio.init_app(app, cors_allowed_origins=[FRONTEND_URL, "*"])
+socketio.init_app(app, cors_allowed_origins=allowed_origins + ["*"])
 
 register_routes(app)
 start_auto_submit_job()
