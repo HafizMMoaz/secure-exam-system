@@ -1,4 +1,4 @@
-from flask import Flask, redirect
+from flask import Flask, redirect, request
 from flask_cors import CORS
 
 from exceptions import register_error_handlers
@@ -11,10 +11,32 @@ from middleware.rate_limit import limiter
 from middleware.socketio_app import socketio
 
 app = Flask(__name__)
-allowed_origins = [origin.strip() for origin in FRONTEND_URL.split(",") if origin.strip()]
+allowed_origins = [origin.strip().rstrip("/") for origin in FRONTEND_URL.split(",") if origin.strip()]
+default_dev_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
+for origin in default_dev_origins:
+  if origin not in allowed_origins:
+    allowed_origins.append(origin)
 frontend_redirect_url = allowed_origins[0] if allowed_origins else FRONTEND_URL
 
-CORS(app, origins=allowed_origins, supports_credentials=True)
+CORS(
+  app,
+  resources={r"/api/*": {"origins": allowed_origins}},
+  supports_credentials=True,
+  allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+  methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+)
+
+
+@app.after_request
+def add_cors_headers(response):
+  origin = request.headers.get("Origin", "").rstrip("/")
+  if origin and origin in allowed_origins:
+    response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Vary"] = "Origin"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+  return response
 
 # Swagger docs at http://localhost:5500/api/docs 
 init_swagger(app)

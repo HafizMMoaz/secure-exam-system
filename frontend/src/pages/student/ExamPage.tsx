@@ -133,6 +133,8 @@ function StudentChrome({
   showStepIndicator?: boolean
   children: React.ReactNode
 }) {
+  const navigate = useNavigate()
+
   return (
     <div className="exam-shell">
       <header className="topbar">
@@ -930,6 +932,9 @@ export default function ExamPage() {
             <div className="timer-meta">Time remaining</div>
             <div className={`timer-value ${timerColor}`}>{formatTime(remainingSeconds)}</div>
           </div>
+          <button className="btn btn-ghost btn-sm" onClick={() => navigate("/results")}>
+            <BarChart3 size={14} /> Results
+          </button>
           <button className="btn btn-ghost btn-sm" onClick={() => setShowMap(true)}>
             <MapIcon size={14} /> Map
           </button>
