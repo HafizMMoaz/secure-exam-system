@@ -168,6 +168,7 @@ def get_exam_state(exam_id, requester_id=None):
     result = {
         "exam_id": str(exam["_id"]),
         "state": exam.get("state"),
+        "approval_mode": exam.get("approval_mode", "both"),
     }
     # If a student is asking, include their own enrollment status so the
     # waiting screen can route them at the right moment without exposing

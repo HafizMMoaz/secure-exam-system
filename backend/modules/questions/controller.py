@@ -15,6 +15,7 @@ from modules.questions.service import (
     get_exam_public,
     get_exam_students,
     get_exam_results,
+    list_student_results,
     get_student_answers,
     list_exams,
     list_questions,
@@ -143,6 +144,12 @@ def get_exam_students_route(exam_id):
 def get_exam_results_route(exam_id):
     user_context = getattr(request, "user", {})
     data = get_exam_results(user_context, exam_id)
+    return success_response(data=data)
+
+
+def list_student_results_route():
+    user_context = getattr(request, "user", {})
+    data = list_student_results(user_context)
     return success_response(data=data)
 
 

@@ -61,6 +61,7 @@ function humanize(raw: string): string {
     [/^Invalid (credentials|password)$/i, "That username or password didn't match."],
     [/^Invalid activation code$/i, "That activation code doesn't look right. Please re-check with your teacher."],
     [/^Activation code has expired$/i, "That activation code has expired. Ask your teacher for a new one."],
+    [/^This exam is configured for manual approval only\. Activation codes are disabled\.$/i, "This exam is set to manual approval only, so no verification code is needed."],
     [/^Only teachers can /i, "You don't have permission to do that."],
     [/^You are not allowed /i, "You don't have permission to do that."],
     [/^Field '([^']+)' is required$/i, "Please fill in every field before continuing."],

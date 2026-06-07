@@ -3,6 +3,8 @@ export interface User {
   role: "student" | "teacher"
 }
 
+export type ApprovalMode = "manual" | "code" | "both"
+
 export type ExamStep =
   | "DEVICE_REGISTRATION"
   | "EXAM_SELECTION"
@@ -48,6 +50,7 @@ export interface Exam {
   title: string
   description: string
   duration_minutes: number
+  approval_mode: ApprovalMode
   state: string
   created_at: string
   max_students: number
@@ -100,4 +103,24 @@ export interface LogEntry {
   timestamp: string
   integrity_hash: string
   received_at: string
+}
+
+export interface StudentExamResult {
+  exam_id: string
+  exam_title: string
+  exam_state: string
+  start_time: string | null
+  end_time: string | null
+  mcq_correct: number
+  mcq_wrong: number
+  mcq_unanswered: number
+  mcq_score: number
+  mcq_total: number
+  text_answered: number
+  text_total: number
+  negative_penalty: number
+  risk_score: number
+  risk_penalty: number
+  final_score: number
+  exam_total: number
 }

@@ -5,16 +5,18 @@ import {
   LogOut,
   Send,
   Map as MapIcon,
+  BarChart3,
 } from "lucide-react"
 import client from "../../api/client"
 import { getErrorMessage } from "../../api/errors"
 import { useAuth } from "../../hooks/useAuth"
 import { getDeviceSignals, useDeviceFingerprint } from "../../hooks/useDeviceFingerprint"
 import { useExamMonitoring } from "../../hooks/useExamMonitoring"
-import type { ApiResponse, ExamStep, Question } from "../../types"
+import type { ApiResponse, ApprovalMode, ExamStep, Question } from "../../types"
 
 interface ExamStatePayload {
   state: string
+  approval_mode?: ApprovalMode
   student_enrolled?: boolean
   student_approved?: boolean
   student_activated?: boolean
@@ -33,6 +35,7 @@ interface PublicExamPayload {
   approved_count?: number
   total_questions: number
   total_marks: number
+  approval_mode?: ApprovalMode
 }
 
 interface EnrollExamPayload {
@@ -142,6 +145,9 @@ function StudentChrome({
           <span className="badge badge-zinc">{user?.role || "student"}</span>
         </div>
         <div className="topbar-right">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate("/results") }>
+            <BarChart3 size={14} /> Results
+          </button>
           <button type="button" className="btn btn-ghost btn-sm" onClick={onLogout}>
             <LogOut size={14} /> Sign out
           </button>
@@ -182,9 +188,11 @@ export default function ExamPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [examState, setExamState] = useState("")
+  const [examApprovalMode, setExamApprovalMode] = useState<ApprovalMode>("both")
   const [resumeMessage, setResumeMessage] = useState("")
 
   const autoSubmitRef = useRef(false)
+  const autoActivatingRef = useRef(false)
   const currentTimeRef = useRef(currentTime)
 
   useEffect(() => {
@@ -215,6 +223,7 @@ export default function ExamPage() {
     setMaxStudents(0)
     setStudentsCount(0)
     setTotalMarks(0)
+    setExamApprovalMode("both")
   }
 
   const isExamJoinable =
@@ -394,7 +403,13 @@ export default function ExamPage() {
         const response = await client.get<ExamStateResponse>(`/api/auth/exam/state/${examId}`)
         if (cancelled) return
 
-        const { state: nextState, student_approved, student_activated } = response.data.data
+        const { state: nextState, approval_mode, student_approved, student_activated } = response.data.data
+        const mode = (approval_mode || examApprovalMode || "both") as ApprovalMode
+        const requiresManualApproval = mode !== "code"
+        const requiresCode = mode !== "manual"
+        const allowedByManualGate = !requiresManualApproval || Boolean(student_approved)
+
+        setExamApprovalMode(mode)
         setExamState(nextState)
 
         if (
@@ -407,19 +422,46 @@ export default function ExamPage() {
           return
         }
 
-        // PRD section 14: teacher approval (step 3) gates activation (step 4).
-        // Only route to ACTIVATION once this student has actually been
-        // approved by the teacher - not just because the exam is open.
-        // If the student has ALREADY validated the activation code (the
-        // backend single-use guard would otherwise reject a second try),
-        // jump straight to RANDOMIZATION so they can resume cleanly.
+        // Route based on the configured entry mode:
+        // - manual: teacher approval only
+        // - code: verification code only
+        // - both: teacher approval + verification code
+        // If the student has already activated, jump to RANDOMIZATION.
         if (
-          student_approved &&
+          allowedByManualGate &&
           (nextState === "TEACHER_APPROVED" ||
             nextState === "ACTIVATION_VALID" ||
             nextState === "IN_PROGRESS")
         ) {
-          setStep(student_activated ? "RANDOMIZATION" : "ACTIVATION")
+          if (student_activated) {
+            setStep("RANDOMIZATION")
+            return
+          }
+
+          if (requiresCode) {
+            setStep("ACTIVATION")
+            return
+          }
+
+          if (autoActivatingRef.current) {
+            return
+          }
+
+          autoActivatingRef.current = true
+          try {
+            await client.post("/api/activation/validate", {
+              exam_id: examId,
+            })
+            if (!cancelled) {
+              setStep("RANDOMIZATION")
+            }
+          } catch (autoActivationError) {
+            if (!cancelled) {
+              setError(getErrorMessage(autoActivationError))
+            }
+          } finally {
+            autoActivatingRef.current = false
+          }
         }
       } catch (waitingError) {
         if (!cancelled) {
@@ -437,7 +479,7 @@ export default function ExamPage() {
       cancelled = true
       window.clearInterval(intervalId)
     }
-  }, [examId, step])
+  }, [examApprovalMode, examId, step])
 
   useEffect(() => {
     if (step !== "RANDOMIZATION" || !examId) return
@@ -591,6 +633,7 @@ export default function ExamPage() {
        setStudentsCount(exam.approved_count ?? exam.students_count)
       setTotalMarks(exam.total_marks || 0)
       setExamState(exam.state)
+      setExamApprovalMode(exam.approval_mode || "both")
 
       // If the exam is already past the student-take window (submitted,
       // being analyzed, or fully completed) there is nothing left to do -
@@ -733,6 +776,14 @@ export default function ExamPage() {
 
   if (step === "EXAM_WAITING") {
     const countdownSeconds = examState === "TEACHER_APPROVED" ? 0 : getRemainingSeconds(examStartTime, currentTime)
+    const requiresManualApproval = examApprovalMode !== "code"
+    const requiresCode = examApprovalMode !== "manual"
+    const waitingMessage = requiresManualApproval
+      ? "Your teacher needs to approve you before you can continue."
+      : "Waiting for exam activation to open."
+    const continueMessage = requiresCode
+      ? "You'll enter a verification code next."
+      : "You'll continue automatically without a verification code."
     return (
       <StudentChrome user={user} currentStep={step} onLogout={handleLogout}>
         <div className="exam-stage">
@@ -741,15 +792,13 @@ export default function ExamPage() {
             <h1 className="exam-stage-title">Waiting room</h1>
           </div>
           <p className="exam-stage-body">
-            You&apos;re enrolled in <b>{examTitle || "this exam"}</b>. Your teacher
-            needs to approve you before you can enter the activation code.
-            We&apos;ll continue automatically once they do.
+            You&apos;re enrolled in <b>{examTitle || "this exam"}</b>. {waitingMessage} {continueMessage}
           </p>
 
           <div className="card" style={{ display: "grid", gap: 12 }}>
             <div>
               <span className="eyebrow">Status</span>
-              <h3 style={{ marginTop: 4 }}>Waiting for teacher approval</h3>
+              <h3 style={{ marginTop: 4 }}>{requiresManualApproval ? "Waiting for teacher approval" : "Waiting for exam readiness"}</h3>
             </div>
             {countdownSeconds > 0 && examState !== "TEACHER_APPROVED" ? (
               <div>

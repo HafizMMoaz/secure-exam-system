@@ -21,7 +21,7 @@ export default function Login() {
     setLoading(true)
     try {
       const user = await login(username.trim(), password)
-      navigate(user.role === "student" ? "/exam" : "/dashboard", { replace: true })
+      navigate(user.role === "student" ? "/results" : "/dashboard", { replace: true })
     } catch (loginError: unknown) {
       setError(getErrorMessage(loginError))
     } finally {

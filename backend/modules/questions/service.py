@@ -11,7 +11,7 @@ from bson import ObjectId
 from pymongo.errors import PyMongoError
 from pytz import utc
 
-from config.config import questions_col, exams_col, responses_col, devices_col, BASE_URL, now, iso_utc_z
+from config.config import questions_col, exams_col, responses_col, risk_scores_col, devices_col, BASE_URL, now, iso_utc_z
 from middleware.state_client import transition_exam_state
 from middleware.socketio_app import emit_monitoring_event
 from enums.module_name import ModuleName
@@ -89,6 +89,13 @@ def _is_teacher_exam_owner(user_context, exam):
     return str(exam.get("created_by")) == str((user_context or {}).get("user_id"))
 
 
+def _normalize_approval_mode(value):
+    mode = str(value or "both").strip().lower()
+    if mode not in {"manual", "code", "both"}:
+        raise BadRequestException("approval_mode must be one of: manual, code, both")
+    return mode
+
+
 def create_exam(user_context, payload):
     title = (payload or {}).get("title")
     description = (payload or {}).get("description", "") or ""
@@ -96,6 +103,7 @@ def create_exam(user_context, payload):
     max_students = (payload or {}).get("max_students", 30)
     start_time_raw = (payload or {}).get("start_time")
     end_time_raw = (payload or {}).get("end_time")
+    approval_mode = _normalize_approval_mode((payload or {}).get("approval_mode"))
 
     if not title or not str(title).strip():
         raise BadRequestException("title is required")
@@ -139,6 +147,7 @@ def create_exam(user_context, payload):
         "max_students": max_students,
         "start_time": start_time,
         "end_time": end_time,
+        "approval_mode": approval_mode,
         "created_by": (user_context or {}).get("user_id"),
         "created_at": now(),
         "state": ExamState.NOT_STARTED.value,
@@ -162,6 +171,7 @@ def create_exam(user_context, payload):
         "title": exam_document["title"],
         "state": ExamState.NOT_STARTED.value,
         "duration_minutes": duration_minutes,
+        "approval_mode": approval_mode,
     }
 
 
@@ -186,6 +196,7 @@ def list_exams(user_context):
                     "approved_count": _approved_count(exam),
                     "start_time": _serialize_dt(exam.get("start_time")),
                     "end_time": _serialize_dt(exam.get("end_time")),
+                    "approval_mode": exam.get("approval_mode", "both"),
                     "state": exam.get("state"),
                     "created_at": _serialize_dt(exam.get("created_at")),
                 }
@@ -210,6 +221,7 @@ def get_exam(exam_id):
         "total_marks": exam.get("total_marks", 0),
         "start_time": _serialize_dt(exam.get("start_time")),
         "end_time": _serialize_dt(exam.get("end_time")),
+        "approval_mode": exam.get("approval_mode", "both"),
         "state": exam.get("state"),
         "created_at": _serialize_dt(exam.get("created_at")),
         "created_by": exam.get("created_by"),
@@ -226,6 +238,7 @@ def get_exam_public(exam_id):
         "state": exam.get("state"),
         "start_time": _serialize_dt(exam.get("start_time")),
         "end_time": _serialize_dt(exam.get("end_time")),
+        "approval_mode": exam.get("approval_mode", "both"),
         "max_students": exam.get("max_students", 30),
         "students_count": exam.get("students_count", 0),
         "approved_count": _approved_count(exam),
@@ -285,8 +298,13 @@ def enroll_student(user_context, exam_id, auth_header=""):
 
     exam = _get_exam(str(exam_id).strip())
 
-    # Allow enrollment in TEACHER_APPROVED and IN_PROGRESS states
-    if exam.get("state") not in {ExamState.TEACHER_APPROVED.value, ExamState.IN_PROGRESS.value}:
+    # Allow enrollment in TEACHER_APPROVED and in-flight states while the
+    # exam is running.
+    if exam.get("state") not in {
+        ExamState.TEACHER_APPROVED.value,
+        ExamState.ACTIVATION_VALID.value,
+        ExamState.IN_PROGRESS.value,
+    }:
         raise ExamStateException(current_state=exam.get("state"), required_state=ExamState.TEACHER_APPROVED.value)
 
     current_time = now()
@@ -322,6 +340,9 @@ def enroll_student(user_context, exam_id, auth_header=""):
     if students_count >= max_students:
         raise ConflictException("Exam is full")
 
+    approval_mode = exam.get("approval_mode", "both")
+    auto_approve = approval_mode == "code"
+
     try:
         exams_col.update_one(
             {"_id": exam.get("_id")},
@@ -330,9 +351,9 @@ def enroll_student(user_context, exam_id, auth_header=""):
                     "students": {
                         "student_id": student_id,
                         "joined_at": now(),
-                        "approved": False,
-                        "approved_at": None,
-                        "approved_by": None,
+                        "approved": auto_approve,
+                        "approved_at": now() if auto_approve else None,
+                        "approved_by": "system" if auto_approve else None,
                     }
                 },
                 "$addToSet": {"enrolled_students": student_id},
@@ -353,6 +374,7 @@ def enroll_student(user_context, exam_id, auth_header=""):
     return {
         "already_enrolled": False,
         "exam_id": str(exam.get("_id")),
+        "approved": auto_approve,
         "start_time": _serialize_dt(start_time),
         "end_time": _serialize_dt(end_time),
         "duration_minutes": exam.get("duration_minutes", 0),
@@ -674,6 +696,10 @@ def update_exam(user_context, exam_id, payload):
     if end_time_raw is not None:
         end_time = _parse_iso_datetime(end_time_raw)
         updates["end_time"] = end_time
+
+    approval_mode = (payload or {}).get("approval_mode")
+    if approval_mode is not None:
+        updates["approval_mode"] = _normalize_approval_mode(approval_mode)
 
     if start_time is None:
         start_time = exam.get("start_time")
@@ -1104,6 +1130,104 @@ def get_exam_results(user_context, exam_id):
         "negative_marking_factor": NEG_FACTOR,
         "risk_max_penalty_fraction": RISK_MAX_FRAC,
         "students": rows,
+    }
+
+
+def list_student_results(user_context):
+    student_id = (user_context or {}).get("user_id")
+    if not student_id:
+        raise BadRequestException("student is required")
+
+    try:
+        cursor = exams_col.find({"students.student_id": student_id}).sort("end_time", -1)
+    except PyMongoError as exc:
+        raise DatabaseException(str(exc))
+
+    NEG_FACTOR = 0.25
+    RISK_MAX_FRAC = 0.5
+    current = now()
+
+    results = []
+    for exam in cursor:
+        exam_id = str(exam.get("_id"))
+        exam_end = _normalize_dt(exam.get("end_time"))
+        exam_state = exam.get("state")
+        exam_over = exam_state == ExamState.COMPLETED.value or (exam_end is not None and current > exam_end)
+        if not exam_over:
+            continue
+
+        questions = list(questions_col.find({"exam_id": exam_id}))
+        mcq_qs = [q for q in questions if q.get("question_type") == "mcq"]
+        text_qs = [q for q in questions if q.get("question_type") == "text"]
+
+        mcq_total_marks = sum(int(q.get("marks", 0)) for q in mcq_qs)
+        text_total_marks = sum(int(q.get("marks", 0)) for q in text_qs)
+        exam_total_marks = mcq_total_marks + text_total_marks
+
+        student_responses = list(responses_col.find({"exam_id": exam_id, "student_id": student_id}))
+        resp_by_q = {str(r.get("question_id")): r for r in student_responses}
+
+        mcq_correct = 0
+        mcq_wrong = 0
+        mcq_unanswered = 0
+        mcq_score = 0
+        for q in mcq_qs:
+            qid = str(q.get("_id"))
+            marks = int(q.get("marks", 0))
+            r = resp_by_q.get(qid)
+            if not r or not r.get("answer_text"):
+                mcq_unanswered += 1
+                continue
+            if r.get("answer_text") == q.get("correct_answer"):
+                mcq_correct += 1
+                mcq_score += marks
+            else:
+                mcq_wrong += 1
+
+        text_answered = sum(
+            1 for q in text_qs
+            if resp_by_q.get(str(q.get("_id"))) and resp_by_q[str(q.get("_id"))].get("answer_text")
+        )
+
+        negative_penalty = round(sum(
+            int(q.get("marks", 0)) * NEG_FACTOR
+            for q in mcq_qs
+            if resp_by_q.get(str(q.get("_id")))
+            and resp_by_q[str(q.get("_id"))].get("answer_text")
+            and resp_by_q[str(q.get("_id"))].get("answer_text") != q.get("correct_answer")
+        ), 2)
+
+        risk_doc = risk_scores_col.find_one(
+            {"exam_id": exam_id, "student_id": student_id},
+            sort=[("computed_at", -1)],
+        )
+        risk_score = float((risk_doc or {}).get("score", 0))
+        risk_penalty = round(mcq_score * (risk_score / 10.0) * RISK_MAX_FRAC, 2)
+        final_score = round(max(0, mcq_score - negative_penalty - risk_penalty), 2)
+
+        results.append({
+            "exam_id": exam_id,
+            "exam_title": exam.get("title", ""),
+            "exam_state": exam_state,
+            "start_time": _serialize_dt(exam.get("start_time")),
+            "end_time": _serialize_dt(exam.get("end_time")),
+            "mcq_correct": mcq_correct,
+            "mcq_wrong": mcq_wrong,
+            "mcq_unanswered": mcq_unanswered,
+            "mcq_score": mcq_score,
+            "mcq_total": mcq_total_marks,
+            "text_answered": text_answered,
+            "text_total": text_total_marks,
+            "negative_penalty": negative_penalty,
+            "risk_score": round(risk_score, 2),
+            "risk_penalty": risk_penalty,
+            "final_score": final_score,
+            "exam_total": exam_total_marks,
+        })
+
+    return {
+        "results": results,
+        "count": len(results),
     }
 
 

@@ -13,6 +13,7 @@ from modules.questions.controller import (
   get_exam_public_route,
   get_exam_students_route,
   get_exam_results_route,
+  list_student_results_route,
   list_all_for_student_route,
   list_answers_route,
   list_all,
@@ -241,6 +242,10 @@ def create_exam_bp_route():
               type: integer
               minimum: 10
               maximum: 180
+            approval_mode:
+              type: string
+              enum: [manual, code, both]
+              default: both
     responses:
       200:
         description: Exam created
@@ -621,6 +626,29 @@ def get_exam_results_bp_route(exam_id):
         description: Exam not found
     """
     return get_exam_results_route(exam_id)
+
+
+@questions_bp.route("/exams/results/me", methods=["GET"])
+@jwt_required
+@role_required("student")
+def list_student_results_bp_route():
+    """
+    List previous exam results for the authenticated student.
+    Includes exams that are completed or past end_time.
+    ---
+    tags:
+      - Questions
+    security:
+      - BearerAuth: []
+    responses:
+      200:
+        description: Student results returned
+      401:
+        description: Invalid or missing JWT
+      403:
+        description: Forbidden
+    """
+    return list_student_results_route()
 
 
 @questions_bp.route("/exams/students/approve", methods=["POST"])

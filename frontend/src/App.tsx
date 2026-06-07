@@ -4,6 +4,7 @@ import { ProtectedRoute } from "./components/ProtectedRoute"
 import Login from "./pages/Login"
 import Register from "./pages/Register"
 import ExamPage from "./pages/student/ExamPage.tsx"
+import ResultsPage from "./pages/student/ResultsPage"
 import Dashboard from "./pages/teacher/Dashboard"
 import "./App.css"
 
@@ -21,6 +22,14 @@ export default function App() {
                 element={
                   <ProtectedRoute role="student">
                     <ExamPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/results"
+                element={
+                  <ProtectedRoute role="student">
+                    <ResultsPage />
                   </ProtectedRoute>
                 }
               />

@@ -23,7 +23,7 @@ import {
 import client from "../../api/client"
 import { getErrorMessage } from "../../api/errors"
 import { useAuth } from "../../hooks/useAuth"
-import type { ApiResponse, Exam, LogEntry, QuestionWithAnswer, RiskScore, StudentUser } from "../../types"
+import type { ApiResponse, ApprovalMode, Exam, LogEntry, QuestionWithAnswer, RiskScore, StudentUser } from "../../types"
 
 type Tab = "exams" | "overview" | "questions" | "logs" | "risk" | "students"
 
@@ -36,7 +36,7 @@ interface ActivationCodePayload {
 }
 
 type ExamsResponse = ApiResponse<{ exams?: Exam[]; count?: number } | Exam[]>
-type CreateExamResponse = ApiResponse<{ exam_id: string; title: string; state: string }>
+type CreateExamResponse = ApiResponse<{ exam_id: string; title: string; state: string; approval_mode: ApprovalMode }>
 type ApproveExamResponse = ApiResponse<{ exam_id: string; state: string }>
 type ExamStateResponse = ApiResponse<ExamStatePayload>
 type ExamDetailsResponse = ApiResponse<Exam>
@@ -166,6 +166,17 @@ function formatLocalDateTime(value: string) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }
 
+function approvalModeLabel(mode: ApprovalMode) {
+  switch (mode) {
+    case "manual":
+      return "Manual approval only"
+    case "code":
+      return "Verification code only"
+    default:
+      return "Manual approval + verification code"
+  }
+}
+
 export default function Dashboard() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -181,6 +192,7 @@ export default function Dashboard() {
   const [newExamDate, setNewExamDate] = useState("")
   const [newExamStartTime, setNewExamStartTime] = useState("")
   const [newExamEndTime, setNewExamEndTime] = useState("")
+  const [newExamApprovalMode, setNewExamApprovalMode] = useState<ApprovalMode>("both")
   const [questionText, setQuestionText] = useState("")
   const [questionType, setQuestionType] = useState<"mcq" | "text">("mcq")
   const [questionMarks, setQuestionMarks] = useState(1)
@@ -255,6 +267,8 @@ export default function Dashboard() {
   // - same gate the backend enforces on create/update/delete_question.
   const canEditQuestions = examState === "NOT_STARTED" || !examState
   const canShowActivationCode = ["TEACHER_APPROVED", "ACTIVATION_VALID", "IN_PROGRESS"].includes(examState)
+  const requiresManualApproval = (selectedExam?.approval_mode || "both") !== "code"
+  const requiresVerificationCode = (selectedExam?.approval_mode || "both") !== "manual"
 
   // Update once every 30s so the "exam is over" gate (end_time-based)
   // flips without requiring a refresh.
@@ -377,6 +391,7 @@ export default function Dashboard() {
         max_students: newExamMaxStudents,
         start_time: startTimeIso,
         end_time: endTimeIso,
+        approval_mode: newExamApprovalMode,
       })
 
       const createdExam: Exam = {
@@ -384,6 +399,7 @@ export default function Dashboard() {
         title,
         description,
         duration_minutes: newExamDuration,
+        approval_mode: response.data.data.approval_mode,
         state: response.data.data.state,
         created_at: new Date().toISOString(),
         max_students: newExamMaxStudents,
@@ -403,6 +419,7 @@ export default function Dashboard() {
       setNewExamDate("")
       setNewExamStartTime("")
       setNewExamEndTime("")
+      setNewExamApprovalMode("both")
       setSuccess("Exam created")
       setTab("exams")
     } catch (createError) {
@@ -1299,6 +1316,19 @@ export default function Dashboard() {
                 </div>
               </div>
 
+              <div className="field">
+                <label className="label">Student entry approval</label>
+                <select
+                  className="input"
+                  value={newExamApprovalMode}
+                  onChange={(event) => setNewExamApprovalMode(event.target.value as ApprovalMode)}
+                >
+                  <option value="both">Manual approval + verification code</option>
+                  <option value="manual">Manual approval only</option>
+                  <option value="code">Verification code only</option>
+                </select>
+              </div>
+
               <button type="button" className="btn btn-primary" onClick={() => void handleCreateExam()} disabled={loading}>
                 {loading ? <span className="spinner" aria-label="Loading" /> : "Create exam"}
               </button>
@@ -1411,6 +1441,7 @@ export default function Dashboard() {
                     <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: "0.8125rem", color: "var(--ink-3)" }}>
                       <span><b style={{ color: "var(--ink-2)" }}>Starts</b> · {formatLocalDateTime(selectedExam.start_time)}</span>
                       <span><b style={{ color: "var(--ink-2)" }}>Ends</b> · {formatLocalDateTime(selectedExam.end_time)}</span>
+                      <span><b style={{ color: "var(--ink-2)" }}>Entry mode</b> · {approvalModeLabel(selectedExam.approval_mode || "both")}</span>
                     </div>
 
                     <div className="hairline" />
@@ -1425,7 +1456,7 @@ export default function Dashboard() {
                           <CopyButton value={examId} label="Copy exam ID" />
                         </div>
                       </div>
-                      {activationCode ? (
+                      {requiresVerificationCode && activationCode ? (
                         <div>
                           <div className="eyebrow" style={{ marginBottom: 6 }}>Join code — share with students</div>
                           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -1473,10 +1504,15 @@ export default function Dashboard() {
                       </button>
                     </>
                   ) : null}
-                  {canShowActivationCode ? (
+                  {canShowActivationCode && requiresVerificationCode ? (
                     <button type="button" className="btn btn-primary" onClick={() => void handleGenerateActivationCode()} disabled={loading}>
                       {loading ? <span className="spinner" aria-label="Loading" /> : "View Activation Code"}
                     </button>
+                  ) : null}
+                  {!requiresVerificationCode ? (
+                    <span className="badge badge-zinc" style={{ alignSelf: "center" }}>
+                      Verification code disabled for this exam
+                    </span>
                   ) : null}
                   {examState === "SUBMITTED" || examState === "ANALYZING" ? (
                     <span className="badge badge-zinc" style={{ alignSelf: "center" }}>
@@ -1501,7 +1537,7 @@ export default function Dashboard() {
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                   <h3 style={{ marginBottom: 0 }}>Students Joined</h3>
                   <span className="muted" style={{ fontSize: "0.8125rem" }}>
-                    {examStudents.length} {examStudents.length === 1 ? "student" : "students"} · live
+                    {examStudents.length} {examStudents.length === 1 ? "student" : "students"} · {requiresManualApproval ? "manual approval" : "auto-approved"}
                   </span>
                 </div>
 
@@ -1527,11 +1563,11 @@ export default function Dashboard() {
                             <td>{student.activated_at ? formatLocalDateTime(student.activated_at) : <span className="muted">—</span>}</td>
                             <td>
                               <span className={`badge ${student.approved ? "badge-green" : "badge-zinc"}`}>
-                                {student.approved ? "Approved" : "Pending"}
+                                {student.approved ? "Approved" : requiresManualApproval ? "Pending" : "Auto-approved"}
                               </span>
                             </td>
                             <td>
-                              {!student.approved ? (
+                              {!student.approved && requiresManualApproval ? (
                                 <button
                                   type="button"
                                   className="btn btn-primary"
@@ -1541,7 +1577,7 @@ export default function Dashboard() {
                                   {approvingStudentId === student.student_id && loading ? <span className="spinner" aria-label="Loading" /> : "Approve"}
                                 </button>
                               ) : (
-                                <span className="muted">Approved</span>
+                                <span className="muted">{requiresManualApproval ? "Approved" : "Not required"}</span>
                               )}
                             </td>
                           </tr>

@@ -58,12 +58,12 @@ def validate_route():
           type: object
           required:
             - exam_id
-            - code
           properties:
             exam_id:
               type: string
             code:
               type: string
+              description: Required only when exam approval_mode is code or both
     responses:
       200:
         description: Activation code validated

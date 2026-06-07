@@ -54,6 +54,17 @@ def _validate_code(code):
     return str(code).strip()
 
 
+def _approval_requirements(exam_doc):
+    mode = str((exam_doc or {}).get("approval_mode") or "both").strip().lower()
+    if mode not in {"manual", "code", "both"}:
+        mode = "both"
+    return {
+        "mode": mode,
+        "requires_manual_approval": mode in {"manual", "both"},
+        "requires_code": mode in {"code", "both"},
+    }
+
+
 def _generate_code():
     return "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
 
@@ -90,6 +101,10 @@ def generate_activation_code(user_context, payload):
 
     if not exam:
         raise ExamNotFoundException()
+
+    approval = _approval_requirements(exam)
+    if not approval["requires_code"]:
+        raise BadRequestException("This exam is configured for manual approval only. Activation codes are disabled.")
 
     # Check if an unexpired activation code already exists for this exam
     existing_code = exam.get("activation_code")
@@ -164,41 +179,42 @@ def generate_activation_code(user_context, payload):
 
 def validate_activation_code(user_context, payload):
     exam_id = _validate_exam_id((payload or {}).get("exam_id"))
-    code = _validate_code((payload or {}).get("code"))
-    code_hash = _code_hash(code)
-
-    try:
-        activation = activation_codes_col.find_one({"exam_id": exam_id, "code_hash": code_hash})
-    except PyMongoError as exc:
-        raise DatabaseException(str(exc))
-
-    if not activation:
-        _send_log(
-            LogLevel.SECURITY.value,
-            "invalid_activation_code",
-            exam_id,
-            {"exam_id": exam_id},
-            (user_context or {}).get("user_id"),
-        )
-        raise BadRequestException("Invalid activation code")
-
-    expires_at = activation.get("expires_at")
-    if _is_expired(expires_at):
-        _send_log(
-            LogLevel.WARNING.value,
-            "expired_activation_code",
-            exam_id,
-            {"exam_id": exam_id},
-            (user_context or {}).get("user_id"),
-        )
-        raise BadRequestException("Activation code has expired")
-
     requester_id = (user_context or {}).get("user_id")
+    activation = None
+    next_state = ExamState.ACTIVATION_VALID.value
 
     try:
         exam_doc = exams_col.find_one({"_id": ObjectId(exam_id)})
         if not exam_doc:
             raise ExamNotFoundException()
+
+        approval = _approval_requirements(exam_doc)
+        if approval["requires_code"]:
+            code = _validate_code((payload or {}).get("code"))
+            code_hash = _code_hash(code)
+
+            activation = activation_codes_col.find_one({"exam_id": exam_id, "code_hash": code_hash})
+
+            if not activation:
+                _send_log(
+                    LogLevel.SECURITY.value,
+                    "invalid_activation_code",
+                    exam_id,
+                    {"exam_id": exam_id},
+                    requester_id,
+                )
+                raise BadRequestException("Invalid activation code")
+
+            expires_at = activation.get("expires_at")
+            if _is_expired(expires_at):
+                _send_log(
+                    LogLevel.WARNING.value,
+                    "expired_activation_code",
+                    exam_id,
+                    {"exam_id": exam_id},
+                    requester_id,
+                )
+                raise BadRequestException("Activation code has expired")
 
         # Reject activation once the exam has moved into a terminal phase.
         # Even with a still-unexpired code, accepting activation here would
@@ -221,10 +237,8 @@ def validate_activation_code(user_context, payload):
                 "This exam has already finished. Activation is no longer accepted."
             )
 
-        # PRD section 14 workflow: teacher approval is step 3 and MUST gate
-        # step 4 (activation). Reject the code if this student hasn't been
-        # approved by the teacher for this exam, even if they hold a valid
-        # code.
+        # Manual teacher approval is enforced when the exam's entry mode
+        # requires it (manual or both).
         enrolled = exam_doc.get("students", []) or []
         student_entry = next(
             (s for s in enrolled if s.get("student_id") == requester_id),
@@ -239,7 +253,7 @@ def validate_activation_code(user_context, payload):
                 requester_id,
             )
             raise BadRequestException("You haven't enrolled in this exam yet.")
-        if not student_entry.get("approved"):
+        if approval["requires_manual_approval"] and not student_entry.get("approved"):
             _send_log(
                 LogLevel.SECURITY.value,
                 "activation_before_teacher_approval",
@@ -251,42 +265,45 @@ def validate_activation_code(user_context, payload):
                 "Your teacher hasn't approved you for this exam yet. Please wait."
             )
 
-        # PRD section 11 Module 4 - "One-time tokens". Each student may
-        # successfully validate the code at most ONCE. Done atomically so
-        # two concurrent requests can't both pass the reuse check before
-        # either records the redemption: $addToSet with a $ne predicate on
-        # used_by_students. Only one of the racing updates will modify a
-        # document; the other gets matched_count == 0.
-        claim = activation_codes_col.update_one(
-            {
-                "_id": activation.get("_id"),
-                "used_by_students": {"$ne": requester_id},
-            },
-            {
-                "$addToSet": {"used_by_students": requester_id},
-                "$set": {"last_used_at": now()},
-            },
-        )
-        if claim.modified_count == 0:
-            _send_log(
-                LogLevel.SECURITY.value,
-                "activation_code_reuse",
-                exam_id,
-                {"exam_id": exam_id},
-                requester_id,
+        if student_entry.get("activated_at"):
+            return {"exam_id": exam_id, "state": current_state}
+
+        if approval["requires_code"]:
+            # PRD section 11 Module 4 - "One-time tokens". Each student may
+            # successfully validate the code at most ONCE.
+            claim = activation_codes_col.update_one(
+                {
+                    "_id": activation.get("_id"),
+                    "used_by_students": {"$ne": requester_id},
+                },
+                {
+                    "$addToSet": {"used_by_students": requester_id},
+                    "$set": {"last_used_at": now()},
+                },
             )
-            raise BadRequestException(
-                "You've already used this activation code. Each student can only redeem it once."
-            )
+            if claim.modified_count == 0:
+                _send_log(
+                    LogLevel.SECURITY.value,
+                    "activation_code_reuse",
+                    exam_id,
+                    {"exam_id": exam_id},
+                    requester_id,
+                )
+                raise BadRequestException(
+                    "You've already used this activation code. Each student can only redeem it once."
+                )
 
         # Transition the exam state TEACHER_APPROVED -> ACTIVATION_VALID
-        # (only on first activation). Subsequent students activating an
-        # in-progress exam don't regress the state machine.
+        # (only on first activation).
         if current_state == ExamState.TEACHER_APPROVED.value:
             exams_col.update_one(
                 {"_id": ObjectId(exam_id)},
                 {"$set": {"state": ExamState.ACTIVATION_VALID.value}},
             )
+            next_state = ExamState.ACTIVATION_VALID.value
+        else:
+            next_state = current_state
+
         # Mark this student as activated on their enrolled_students entry.
         exams_col.update_one(
             {"_id": ObjectId(exam_id), "students.student_id": requester_id},
@@ -299,13 +316,13 @@ def validate_activation_code(user_context, payload):
 
     _send_log(
         LogLevel.INFO.value,
-        "activation_code_validated",
+        "activation_code_validated" if activation else "activation_without_code",
         exam_id,
         {"exam_id": exam_id, "student_id": (user_context or {}).get("user_id")},
         (user_context or {}).get("user_id"),
     )
 
-    return {"exam_id": exam_id, "state": ExamState.ACTIVATION_VALID.value}
+    return {"exam_id": exam_id, "state": next_state}
 
 
 def get_activation_status(exam_id):
