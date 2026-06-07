@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react"
-import { useLocation, useNavigate } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import { ShieldCheck } from "lucide-react"
 import { useAuth } from "../hooks/useAuth"
 import { getErrorMessage } from "../api/errors"
@@ -78,7 +78,7 @@ export default function Login() {
 
         <div className="auth-meta-row">
           <span>Don&apos;t have an account?</span>
-          <a href="/register">Create one</a>
+          <Link to="/register">Create one</Link>
         </div>
       </div>
     </div>

@@ -1,5 +1,5 @@
 import { useState, type FormEvent, useMemo } from "react"
-import { useNavigate } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { ShieldCheck } from "lucide-react"
 import client from "../api/client"
 import { getErrorMessage } from "../api/errors"
@@ -128,7 +128,7 @@ export default function Register() {
 
         <div className="auth-meta-row">
           <span>Already have an account?</span>
-          <a href="/login">Sign in</a>
+          <Link to="/login">Sign in</Link>
         </div>
       </div>
     </div>
