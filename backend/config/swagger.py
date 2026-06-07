@@ -43,7 +43,7 @@ SWAGGER_TEMPLATE = {
         }
     },
     "basePath": "/",
-    "schemes": ["http"],
+    "schemes": ["https", "http"],
     "securityDefinitions": {
         "BearerAuth": {
             "type": "apiKey",
