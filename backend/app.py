@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, redirect
 from flask_cors import CORS
 
 from exceptions import register_error_handlers
@@ -12,6 +12,7 @@ from middleware.socketio_app import socketio
 
 app = Flask(__name__)
 allowed_origins = [origin.strip() for origin in FRONTEND_URL.split(",") if origin.strip()]
+frontend_redirect_url = allowed_origins[0] if allowed_origins else FRONTEND_URL
 
 CORS(app, origins=allowed_origins, supports_credentials=True)
 
@@ -32,6 +33,11 @@ start_auto_submit_job()
 
 
 # Global health check
+@app.route("/", methods=["GET"])
+def root_redirect():
+  return redirect(frontend_redirect_url, code=302)
+
+
 @app.route("/api/health", methods=["GET"])
 def global_health():
     """
